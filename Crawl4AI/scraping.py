@@ -33,54 +33,23 @@ CORSI_DIEM_URLS = [
     #"https://corsi.unisa.it/photovoltaics"
 ]
 
-def is_relevant(text):
-    """Verifica se il testo è pertinente al DIEM."""
+def is_relevant(text, url):
+    """Verifica se il testo è pertinente al DIEM e fornisce un feedback visivo."""
     text_upper = text.upper()
-    return any(kw in text_upper for kw in KEYWORDS)
-
-# def is_recent_pdf(pdf_url, headers):
-#     # Controllo 1: anno 4 cifre come segmento directory (es. /2025/)
-#     year_match = re.search(r'/(20\d{2})/', pdf_url)
-#     if year_match:
-#         return int(year_match.group(1)) >= 2020
-
-#     # Controllo 2: anno 4 cifre nel nome file (es. _2019_, -2018-)
-#     year_match = re.search(r'[\-_](20\d{2})[\-_\.]', pdf_url)
-#     if year_match:
-#         return int(year_match.group(1)) >= 2020
-
-#     # Controllo 3: anno 2 cifre nel nome file (es. -14-, -17-, -19-)
-#     # Interpreta XX < 50 come 20XX (es. 17 → 2017)
-#     # year_match = re.search(r'[\-_](\d{2})[\-_\.]', os.path.basename(pdf_url))
-#     # if year_match:
-#     #     year_2digit = int(year_match.group(1))
-#     #     full_year = 2000 + year_2digit
-#     #     return full_year >= 2020
-
-#     # Controllo 4: header Last-Modified
-#     last_modified = headers.get('Last-Modified', '')
-#     if last_modified:
-#         try:
-#             from email.utils import parsedate
-#             date_tuple = parsedate(last_modified)
-#             if date_tuple:
-#                 return date_tuple[0] >= 2020
-#         except Exception:
-#             pass
-
-#     # Nessuna info: includi per sicurezza
-#     return True
+    is_valid = any(kw in text_upper for kw in KEYWORDS)
+    
+    if is_valid:
+        print(f"  [FILTRO] ✅ ACCETTATO: {url}")
+    else:
+        print(f"  [FILTRO] ❌ SCARTATO: {url}")
+        
+    return is_valid
 
 def is_recent_pdf(pdf_url, headers):
     """Restituisce False solo se troviamo esplicitamente un anno < 2020."""
-    
-    # Cerca qualsiasi anno 4 cifre nell'URL (directory o nome file)
     year_matches = re.findall(r'(?<!\d)20\d{2}(?!\d)', pdf_url)
     if year_matches:
-        # Basta che almeno uno degli anni trovati sia >= 2020
         return any(int(y) >= 2020 for y in year_matches)
-
-    # Nessun anno trovato → includi per sicurezza
     return True
 
 def download_pdf(pdf_url, downloaded_urls, downloaded_hashes):
@@ -135,12 +104,11 @@ def download_pdf(pdf_url, downloaded_urls, downloaded_hashes):
         pass
 
 def extract_links_and_pdfs(html, current_url, start_url):
-    """Estrae i link validi e individua i PDF."""
+    """Estrae i link validi e individua i PDF, bloccando gli alias nome.cognome."""
     soup = BeautifulSoup(html, "html.parser")
     links_to_visit = []
     pdfs_to_download = []
     
-    # Identifichiamo il dominio base per i PDF (es. "corsi.unisa.it" o "www.diem.unisa.it")
     allowed_domain = urlparse(start_url).netloc
     
     for a in soup.find_all('a', href=True):
@@ -152,15 +120,25 @@ def extract_links_and_pdfs(html, current_url, start_url):
         full_url = urljoin(current_url, href).split('#')[0]
         link_domain = urlparse(full_url).netloc
         
-        # 1. LOGICA PDF: "Maglia Larga" -> Basta che sia nello stesso dominio base (cattura gli /uploads/)
+        # 1. LOGICA PDF (Dominio allargato)
         if full_url.lower().endswith('.pdf') or '/pdf/' in full_url.lower():
             if link_domain == allowed_domain:
                 pdfs_to_download.append(full_url)
                 
-        # 2. LOGICA NAVIGAZIONE HTML: "Maglia Stretta" -> Deve iniziare ESATTAMENTE con lo start_url
+        # 2. LOGICA NAVIGAZIONE HTML
         elif full_url.startswith(start_url):
+            
+            # NUOVO BLOCCO ANTI-DUPLICATI: Scartiamo i link formato "nome.cognome"
+            if allowed_domain == "docenti.unisa.it":
+                path_parts = [p for p in urlparse(full_url).path.split('/') if p]
+                if path_parts:
+                    # Il primo segmento dopo l'URL base è il nome o l'ID
+                    prof_id_or_name = path_parts[0]
+                    # Se contiene un punto (es. mario.rossi), è il formato duplicato! Saltalo.
+                    if '.' in prof_id_or_name:
+                        continue
+            
             if not any(full_url.lower().endswith(ext) for ext in ['.css', '.js', '.png', '.jpg', '.jpeg']):
-                # Escludiamo le versioni inglesi se non ci interessano
                 if '/en/' not in full_url and not full_url.endswith('/en'):
                     links_to_visit.append(full_url)
                 
@@ -179,7 +157,6 @@ async def crawl_task(task, crawler, downloaded_urls, downloaded_hashes, knowledg
     for start_url in start_urls:
         print(f"\n>>> Analisi specifica per: {start_url}")
         
-        # Primo livello: URL di partenza
         current_queue = [start_url]
         visited.add(start_url)
 
@@ -189,7 +166,6 @@ async def crawl_task(task, crawler, downloaded_urls, downloaded_hashes, knowledg
 
             print(f"\n  [Depth {depth}/{max_depth}] Crawling {len(current_queue)} URL in parallelo...")
 
-            # Esegui tutti gli URL del livello corrente in parallelo
             results = await crawler.arun_many(
                 urls=current_queue,
                 config=CrawlerRunConfig(
@@ -205,9 +181,13 @@ async def crawl_task(task, crawler, downloaded_urls, downloaded_hashes, knowledg
                     print(f"  [!] Errore su {result.url}: {result.error_message}")
                     continue
 
-                print(f"  [OK] {result.url}")
+                # 1. VALUTAZIONE FILTRO
+                page_is_relevant = True
+                if use_filter:
+                    page_is_relevant = is_relevant(result.markdown, result.url)
 
-                if not use_filter or is_relevant(result.markdown):
+                # 2. SALVATAGGIO (Solo se rilevante o se filtro disattivato)
+                if page_is_relevant:
                     doc = Document(page_content=result.markdown, metadata={"source": result.url})
                     knowledge_base.append(doc)
 
@@ -221,10 +201,21 @@ async def crawl_task(task, crawler, downloaded_urls, downloaded_hashes, knowledg
 
                     with open(nome_file, "w", encoding="utf-8") as f:
                         f.write(f"SOURCE: {result.url}\n{'='*50}\n\n{result.markdown}")
-                    print(f"  [MD] Salvato: {os.path.basename(nome_file)}")
+                    # Rimosso print del salvataggio MD per pulire il terminale (visto che abbiamo il log del filtro)
 
-                # Esplora link solo se non siamo all'ultimo livello
-                if depth < max_depth:
+                # 3. TAGLIO DEI RAMI (PRUNING LOGIC)
+                should_explore = True
+                
+                # Se la pagina è stata SCARTATA dal filtro...
+                if use_filter and not page_is_relevant:
+                    # Controlliamo se è la Root (da cui invece dobbiamo sempre diramarci)
+                    is_root = result.url.rstrip('/') == start_url.rstrip('/')
+                    if not is_root:
+                        should_explore = False # STOP! Nessun link verrà estratto da questa pagina.
+                        print(f"    ↳ ✂️ Ramo potato: Nessuna esplorazione da questo URL.")
+
+                # 4. ESTRAZIONE LINK
+                if depth < max_depth and should_explore:
                     new_links, pdfs = extract_links_and_pdfs(result.html, result.url, start_url)
 
                     for pdf_url in pdfs:
@@ -246,8 +237,8 @@ async def main():
 
     SEARCH_TASKS = [
         #{"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 3, "filter": False},
-        #{"name": "Docenti", "urls": ["https://docenti.unisa.it/"], "depth": 2, "filter": True},
-        {"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 3, "filter": False}
+        {"name": "Docenti", "urls": ["https://docenti.unisa.it/"], "depth": 2, "filter": True},
+        #{"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 4, "filter": False}
     ]
 
     async with AsyncWebCrawler(verbose=False) as crawler:
@@ -266,9 +257,9 @@ async def main():
         pickle.dump(knowledge_base, f)
 
     print(f"\n--- FINE ---")
-    print(f"Totale pagine HTML: {len(knowledge_base) - len(pdf_docs)}")
+    print(f"Totale pagine HTML salvate: {len(knowledge_base) - len(pdf_docs)}")
     print(f"Totale pagine PDF: {len(pdf_docs)}")
-    print(f"Totale PDF unici: {len(downloaded_hashes)}")
+    print(f"Totale PDF unici scaricati: {len(downloaded_hashes)}")
 
 if __name__ == "__main__":
     asyncio.run(main())
