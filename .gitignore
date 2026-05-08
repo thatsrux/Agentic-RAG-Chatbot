@@ -1,0 +1,12 @@
+# Ignore documents
+*.pdf
+*.md
+*.txt
+
+# Ignore serialized / binary files
+*.pickle
+*.bin
+*.pkl
+
+# Ignore database files
+*.sqlite3
