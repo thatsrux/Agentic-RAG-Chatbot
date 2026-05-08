@@ -9,7 +9,7 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
 # Importiamo Crawl4AI e i Documenti di LangChain
-from crawl4ai import AsyncWebCrawler
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
 from langchain_core.documents import Document
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 
@@ -28,7 +28,7 @@ CORSI_DIEM_URLS = [
     #"https://corsi.unisa.it/ingegneria-informatica",
     #"https://corsi.unisa.it/electrical-engineering-for-digital-energy",
     #"https://corsi.unisa.it/information-Engineering-for-digital-medicine",
-    "https://corsi.unisa.it/ingegneria-informatica-magistrale",
+    #"https://corsi.unisa.it/ingegneria-informatica-magistrale",
     #"https://corsi.unisa.it/ingegneria-dell-informazione",
     #"https://corsi.unisa.it/photovoltaics"
 ]
@@ -38,37 +38,49 @@ def is_relevant(text):
     text_upper = text.upper()
     return any(kw in text_upper for kw in KEYWORDS)
 
+# def is_recent_pdf(pdf_url, headers):
+#     # Controllo 1: anno 4 cifre come segmento directory (es. /2025/)
+#     year_match = re.search(r'/(20\d{2})/', pdf_url)
+#     if year_match:
+#         return int(year_match.group(1)) >= 2020
+
+#     # Controllo 2: anno 4 cifre nel nome file (es. _2019_, -2018-)
+#     year_match = re.search(r'[\-_](20\d{2})[\-_\.]', pdf_url)
+#     if year_match:
+#         return int(year_match.group(1)) >= 2020
+
+#     # Controllo 3: anno 2 cifre nel nome file (es. -14-, -17-, -19-)
+#     # Interpreta XX < 50 come 20XX (es. 17 → 2017)
+#     # year_match = re.search(r'[\-_](\d{2})[\-_\.]', os.path.basename(pdf_url))
+#     # if year_match:
+#     #     year_2digit = int(year_match.group(1))
+#     #     full_year = 2000 + year_2digit
+#     #     return full_year >= 2020
+
+#     # Controllo 4: header Last-Modified
+#     last_modified = headers.get('Last-Modified', '')
+#     if last_modified:
+#         try:
+#             from email.utils import parsedate
+#             date_tuple = parsedate(last_modified)
+#             if date_tuple:
+#                 return date_tuple[0] >= 2020
+#         except Exception:
+#             pass
+
+#     # Nessuna info: includi per sicurezza
+#     return True
+
 def is_recent_pdf(pdf_url, headers):
-    # Controllo 1: anno 4 cifre come segmento directory (es. /2025/)
-    year_match = re.search(r'/(20\d{2})/', pdf_url)
-    if year_match:
-        return int(year_match.group(1)) >= 2020
+    """Restituisce False solo se troviamo esplicitamente un anno < 2020."""
+    
+    # Cerca qualsiasi anno 4 cifre nell'URL (directory o nome file)
+    year_matches = re.findall(r'(?<!\d)20\d{2}(?!\d)', pdf_url)
+    if year_matches:
+        # Basta che almeno uno degli anni trovati sia >= 2020
+        return any(int(y) >= 2020 for y in year_matches)
 
-    # Controllo 2: anno 4 cifre nel nome file (es. _2019_, -2018-)
-    year_match = re.search(r'[\-_](20\d{2})[\-_\.]', pdf_url)
-    if year_match:
-        return int(year_match.group(1)) >= 2020
-
-    # Controllo 3: anno 2 cifre nel nome file (es. -14-, -17-, -19-)
-    # Interpreta XX < 50 come 20XX (es. 17 → 2017)
-    year_match = re.search(r'[\-_](\d{2})[\-_\.]', os.path.basename(pdf_url))
-    if year_match:
-        year_2digit = int(year_match.group(1))
-        full_year = 2000 + year_2digit
-        return full_year >= 2020
-
-    # Controllo 4: header Last-Modified
-    last_modified = headers.get('Last-Modified', '')
-    if last_modified:
-        try:
-            from email.utils import parsedate
-            date_tuple = parsedate(last_modified)
-            if date_tuple:
-                return date_tuple[0] >= 2020
-        except Exception:
-            pass
-
-    # Nessuna info: includi per sicurezza
+    # Nessun anno trovato → includi per sicurezza
     return True
 
 def download_pdf(pdf_url, downloaded_urls, downloaded_hashes):
@@ -138,77 +150,87 @@ def extract_links_and_pdfs(html, current_url, start_url):
         
         if full_url.lower().endswith('.pdf') or '/pdf/' in full_url.lower():
             pdfs_to_download.append(full_url)
-        elif full_url.startswith(start_url):
-            if not any(full_url.lower().endswith(ext) for ext in ['.css', '.js', '.png', '.jpg', '.jpeg']):
-                if '/en/' not in full_url and not full_url.endswith('/en'):
-                    links_to_visit.append(full_url)
+        # DOPO
+        else:
+            allowed_domain = urlparse(start_url).netloc  # es. "www.diem.unisa.it"
+            link_domain = urlparse(full_url).netloc
+            if link_domain == allowed_domain:
+                if not any(full_url.lower().endswith(ext) for ext in ['.css', '.js', '.png', '.jpg', '.jpeg']):
+                    if '/en/' not in full_url and not full_url.endswith('/en'):
+                        links_to_visit.append(full_url)
                 
     return list(set(links_to_visit)), list(set(pdfs_to_download))
 
 async def crawl_task(task, crawler, downloaded_urls, downloaded_hashes, knowledge_base):
-    """Esegue lo scraping con un loop esplicito per ogni URL di partenza."""
     name = task["name"]
     start_urls = task["urls"]
     max_depth = task["depth"]
     use_filter = task["filter"]
 
     print(f"\n{'='*20} INIZIO TASK: {name} {'='*20}")
-    
-    # visited è condiviso tra tutti gli URL dello stesso task per non ri-visitare pagine comuni
+
     visited = set()
 
-    # Iteriamo esplicitamente uno alla volta i link dei corsi (o del sito principale)
     for start_url in start_urls:
         print(f"\n>>> Analisi specifica per: {start_url}")
         
-        # Coda BFS per l'URL corrente
-        queue = [(start_url, 0)]
-        
-        while queue:
-            current_url, current_depth = queue.pop(0)
+        # Primo livello: URL di partenza
+        current_queue = [start_url]
+        visited.add(start_url)
 
-            if current_url in visited:
-                continue
-            visited.add(current_url)
+        for depth in range(max_depth + 1):
+            if not current_queue:
+                break
 
-            print(f"  [Depth {current_depth}/{max_depth}] Analizzando: {current_url}")
+            print(f"\n  [Depth {depth}/{max_depth}] Crawling {len(current_queue)} URL in parallelo...")
 
-            result = await crawler.arun(url=current_url)
-            
-            if not result.success:
-                print(f"  [!] Errore su {current_url}: {result.error_message}")
-                continue
+            # Esegui tutti gli URL del livello corrente in parallelo
+            results = await crawler.arun_many(
+                urls=current_queue,
+                config=CrawlerRunConfig(
+                    cache_mode=CacheMode.BYPASS,
+                ),
+                max_concurrent=10
+            )
 
-            # Filtro e aggiunta documento
-            if not use_filter or is_relevant(result.markdown):
-                doc = Document(page_content=result.markdown, metadata={"source": current_url})
-                knowledge_base.append(doc)
-                
-                # Salvataggio Markdown Live
-                parsed_path = urlparse(current_url).path.rstrip('/')
-                page_name = parsed_path.split('/')[-1] or "home"
+            next_queue = []
 
-                # Gestione duplicati: se esiste già, aggiunge un suffisso numerico
-                nome_file = os.path.join(MD_DIR, f"{page_name}.md")
-                counter = 1
-                while os.path.exists(nome_file):
-                    nome_file = os.path.join(MD_DIR, f"{page_name}_{counter}.md")
-                    counter += 1
+            for result in results:
+                if not result.success:
+                    print(f"  [!] Errore su {result.url}: {result.error_message}")
+                    continue
 
-                with open(nome_file, "w", encoding="utf-8") as f:
-                    f.write(f"SOURCE: {current_url}\n{'='*50}\n\n{result.markdown}")
-                print(f"  [MD] Salvato: {os.path.basename(nome_file)}")
+                print(f"  [OK] {result.url}")
 
-            # Esplorazione nuovi link
-            if current_depth < max_depth:
-                new_links, pdfs = extract_links_and_pdfs(result.html, current_url, start_url)
-                
-                for pdf_url in pdfs:
-                    download_pdf(pdf_url, downloaded_urls, downloaded_hashes)
-                    
-                for link in new_links:
-                    if link not in visited:
-                        queue.append((link, current_depth + 1))
+                if not use_filter or is_relevant(result.markdown):
+                    doc = Document(page_content=result.markdown, metadata={"source": result.url})
+                    knowledge_base.append(doc)
+
+                    parsed_path = urlparse(result.url).path.rstrip('/')
+                    page_name = parsed_path.split('/')[-1] or "home"
+                    nome_file = os.path.join(MD_DIR, f"{page_name}.md")
+                    counter = 1
+                    while os.path.exists(nome_file):
+                        nome_file = os.path.join(MD_DIR, f"{page_name}_{counter}.md")
+                        counter += 1
+
+                    with open(nome_file, "w", encoding="utf-8") as f:
+                        f.write(f"SOURCE: {result.url}\n{'='*50}\n\n{result.markdown}")
+                    print(f"  [MD] Salvato: {os.path.basename(nome_file)}")
+
+                # Esplora link solo se non siamo all'ultimo livello
+                if depth < max_depth:
+                    new_links, pdfs = extract_links_and_pdfs(result.html, result.url, start_url)
+
+                    for pdf_url in pdfs:
+                        download_pdf(pdf_url, downloaded_urls, downloaded_hashes)
+
+                    for link in new_links:
+                        if link not in visited:
+                            visited.add(link)
+                            next_queue.append(link)
+
+            current_queue = next_queue
 
     print(f"\n{'='*20} FINE TASK: {name} {'='*20}")
 
@@ -218,9 +240,9 @@ async def main():
     downloaded_hashes = set()
 
     SEARCH_TASKS = [
-        #{"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 3, "filter": False},
+        {"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 3, "filter": False},
         #{"name": "Docenti", "urls": ["https://docenti.unisa.it/"], "depth": 2, "filter": True},
-        {"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 4, "filter": False}
+        #{"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 4, "filter": False}
     ]
 
     async with AsyncWebCrawler(verbose=False) as crawler:
