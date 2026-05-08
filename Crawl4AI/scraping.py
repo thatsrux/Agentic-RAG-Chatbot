@@ -25,7 +25,7 @@ KEYWORDS = ["DIEM", "DIPARTIMENTO DI INGEGNERIA DELL'INFORMAZIONE", "INGEGNERIA 
 # Link specifici dei corsi DIEM
 CORSI_DIEM_URLS = [
     #"https://corsi.unisa.it/ingegneria-dell-informazione-per-la-medicina-digitale",
-    #"https://corsi.unisa.it/ingegneria-informatica",
+    "https://corsi.unisa.it/ingegneria-informatica",
     #"https://corsi.unisa.it/electrical-engineering-for-digital-energy",
     #"https://corsi.unisa.it/information-Engineering-for-digital-medicine",
     #"https://corsi.unisa.it/ingegneria-informatica-magistrale",
@@ -140,6 +140,9 @@ def extract_links_and_pdfs(html, current_url, start_url):
     links_to_visit = []
     pdfs_to_download = []
     
+    # Identifichiamo il dominio base per i PDF (es. "corsi.unisa.it" o "www.diem.unisa.it")
+    allowed_domain = urlparse(start_url).netloc
+    
     for a in soup.find_all('a', href=True):
         href = a['href']
 
@@ -147,17 +150,19 @@ def extract_links_and_pdfs(html, current_url, start_url):
             href = '/' + href
 
         full_url = urljoin(current_url, href).split('#')[0]
+        link_domain = urlparse(full_url).netloc
         
+        # 1. LOGICA PDF: "Maglia Larga" -> Basta che sia nello stesso dominio base (cattura gli /uploads/)
         if full_url.lower().endswith('.pdf') or '/pdf/' in full_url.lower():
-            pdfs_to_download.append(full_url)
-        # DOPO
-        else:
-            allowed_domain = urlparse(start_url).netloc  # es. "www.diem.unisa.it"
-            link_domain = urlparse(full_url).netloc
             if link_domain == allowed_domain:
-                if not any(full_url.lower().endswith(ext) for ext in ['.css', '.js', '.png', '.jpg', '.jpeg']):
-                    if '/en/' not in full_url and not full_url.endswith('/en'):
-                        links_to_visit.append(full_url)
+                pdfs_to_download.append(full_url)
+                
+        # 2. LOGICA NAVIGAZIONE HTML: "Maglia Stretta" -> Deve iniziare ESATTAMENTE con lo start_url
+        elif full_url.startswith(start_url):
+            if not any(full_url.lower().endswith(ext) for ext in ['.css', '.js', '.png', '.jpg', '.jpeg']):
+                # Escludiamo le versioni inglesi se non ci interessano
+                if '/en/' not in full_url and not full_url.endswith('/en'):
+                    links_to_visit.append(full_url)
                 
     return list(set(links_to_visit)), list(set(pdfs_to_download))
 
@@ -240,9 +245,9 @@ async def main():
     downloaded_hashes = set()
 
     SEARCH_TASKS = [
-        {"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 3, "filter": False},
+        #{"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 3, "filter": False},
         #{"name": "Docenti", "urls": ["https://docenti.unisa.it/"], "depth": 2, "filter": True},
-        #{"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 4, "filter": False}
+        {"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 3, "filter": False}
     ]
 
     async with AsyncWebCrawler(verbose=False) as crawler:
