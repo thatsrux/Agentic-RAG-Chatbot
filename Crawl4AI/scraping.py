@@ -5,7 +5,7 @@ import asyncio
 import logging
 import re
 import hashlib
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 
 # Importiamo Crawl4AI e i Documenti di LangChain
@@ -38,6 +38,39 @@ def is_relevant(text):
     text_upper = text.upper()
     return any(kw in text_upper for kw in KEYWORDS)
 
+def is_recent_pdf(pdf_url, headers):
+    # Controllo 1: anno 4 cifre come segmento directory (es. /2025/)
+    year_match = re.search(r'/(20\d{2})/', pdf_url)
+    if year_match:
+        return int(year_match.group(1)) >= 2020
+
+    # Controllo 2: anno 4 cifre nel nome file (es. _2019_, -2018-)
+    year_match = re.search(r'[\-_](20\d{2})[\-_\.]', pdf_url)
+    if year_match:
+        return int(year_match.group(1)) >= 2020
+
+    # Controllo 3: anno 2 cifre nel nome file (es. -14-, -17-, -19-)
+    # Interpreta XX < 50 come 20XX (es. 17 → 2017)
+    year_match = re.search(r'[\-_](\d{2})[\-_\.]', os.path.basename(pdf_url))
+    if year_match:
+        year_2digit = int(year_match.group(1))
+        full_year = 2000 + year_2digit
+        return full_year >= 2020
+
+    # Controllo 4: header Last-Modified
+    last_modified = headers.get('Last-Modified', '')
+    if last_modified:
+        try:
+            from email.utils import parsedate
+            date_tuple = parsedate(last_modified)
+            if date_tuple:
+                return date_tuple[0] >= 2020
+        except Exception:
+            pass
+
+    # Nessuna info: includi per sicurezza
+    return True
+
 def download_pdf(pdf_url, downloaded_urls, downloaded_hashes):
     """Scarica i PDF, evita i duplicati tramite Hash ed evita le sovrascritture."""
     if pdf_url in downloaded_urls:
@@ -48,6 +81,9 @@ def download_pdf(pdf_url, downloaded_urls, downloaded_hashes):
         ctype = res.headers.get('Content-Type', '').lower()
         
         if res.status_code == 200 and 'application/pdf' in ctype:
+            if not is_recent_pdf(pdf_url, res.headers):
+                print(f"  [SKIP] PDF antecedente al 2020: {pdf_url}")
+                return
             file_hash = hashlib.md5(res.content).hexdigest()
             
             if file_hash in downloaded_hashes:
@@ -104,7 +140,8 @@ def extract_links_and_pdfs(html, current_url, start_url):
             pdfs_to_download.append(full_url)
         elif full_url.startswith(start_url):
             if not any(full_url.lower().endswith(ext) for ext in ['.css', '.js', '.png', '.jpg', '.jpeg']):
-                links_to_visit.append(full_url)
+                if '/en/' not in full_url and not full_url.endswith('/en'):
+                    links_to_visit.append(full_url)
                 
     return list(set(links_to_visit)), list(set(pdfs_to_download))
 
@@ -148,11 +185,19 @@ async def crawl_task(task, crawler, downloaded_urls, downloaded_hashes, knowledg
                 knowledge_base.append(doc)
                 
                 # Salvataggio Markdown Live
-                doc_id = len(knowledge_base)
-                nome_file = os.path.join(MD_DIR, f"pagina_{doc_id}.md")
+                parsed_path = urlparse(current_url).path.rstrip('/')
+                page_name = parsed_path.split('/')[-1] or "home"
+
+                # Gestione duplicati: se esiste già, aggiunge un suffisso numerico
+                nome_file = os.path.join(MD_DIR, f"{page_name}.md")
+                counter = 1
+                while os.path.exists(nome_file):
+                    nome_file = os.path.join(MD_DIR, f"{page_name}_{counter}.md")
+                    counter += 1
+
                 with open(nome_file, "w", encoding="utf-8") as f:
                     f.write(f"SOURCE: {current_url}\n{'='*50}\n\n{result.markdown}")
-                print(f"  [MD] Salvato: pagina_{doc_id}.md")
+                print(f"  [MD] Salvato: {os.path.basename(nome_file)}")
 
             # Esplorazione nuovi link
             if current_depth < max_depth:
@@ -187,15 +232,16 @@ async def main():
     logging.getLogger("pypdf").setLevel(logging.ERROR) 
     
     pdf_loader = PyPDFDirectoryLoader(PDF_DIR)
-    knowledge_base.extend(pdf_loader.load()) 
+    pdf_docs = pdf_loader.load()
+    knowledge_base.extend(pdf_docs) 
 
     with open("knowledge_base.pkl", "wb") as f:
         pickle.dump(knowledge_base, f)
 
     print(f"\n--- FINE ---")
-    print(f"Totale pagine HTML: {len(knowledge_base) - len(downloaded_hashes)}")
+    print(f"Totale pagine HTML: {len(knowledge_base) - len(pdf_docs)}")
+    print(f"Totale pagine PDF: {len(pdf_docs)}")
     print(f"Totale PDF unici: {len(downloaded_hashes)}")
-    print("Database 'knowledge_base.pkl' aggiornato.")
 
 if __name__ == "__main__":
     asyncio.run(main())
