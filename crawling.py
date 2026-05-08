@@ -1,3 +1,4 @@
+import logging
 import os
 import asyncio
 import hashlib
@@ -9,7 +10,8 @@ from urllib.parse import urlparse, urljoin
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
 from tqdm.asyncio import tqdm
 
-# Impostazioni di base e Cartelle
+logging.getLogger("pypdf").setLevel(logging.ERROR)
+
 DATA_PATH = r"data"
 PAGES_DIR = os.path.join(DATA_PATH, "pages")
 PDFS_DIR = os.path.join(DATA_PATH, "PDFs")
@@ -49,13 +51,13 @@ def generate_safe_filename(url, is_pdf):
     
     return f"{safe_name}{ext}"
 
-async def process_pdf(url, session, global_visited, source_page):
+async def process_pdf(url, session, global_visited, source_page, depth, max_depth):
     """Scarica ed estrae il testo da un PDF in modo asincrono."""
     if url in global_visited:
         return
     global_visited.add(url)
     
-    print(f"[FETCH PDF]... ↓ {url}\n             (Trovato in: {source_page})")
+    print(f"   ➔ [{depth}/{max_depth}] [PDF] ↓ {url} (Trovato in: {source_page})")
     
     try:
         async with session.get(url) as response:
@@ -63,7 +65,7 @@ async def process_pdf(url, session, global_visited, source_page):
                 pdf_bytes = await response.read()
                 
                 if not pdf_bytes.startswith(b'%PDF'):
-                    print(f"  [!] Ignorato falso PDF: {url}")
+                    print(f"   ➔ [{depth}/{max_depth}] [!] Ignorato falso PDF: {url}")
                     return
                     
                 reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -78,7 +80,7 @@ async def process_pdf(url, session, global_visited, source_page):
                         f.write(f"---\nsource: {url}\nfound_in: {source_page}\ntype: pdf\n---\n\n")
                         f.write(text)
     except Exception as e:
-        print(f"  [!] Errore nel download/parsing del PDF {url}: {e}")
+        print(f"   ➔ [{depth}/{max_depth}] [!] Errore PDF {url}: {e}")
 
 async def process_site(crawler, session, site, global_visited):
     base_url = site["url"]
@@ -106,7 +108,7 @@ async def process_site(crawler, session, site, global_visited):
         js_code=[js_cleanup] 
     )
 
-    print(f"\n🔍 Esploro: {base_url} (Profondità: {max_depth})")
+    print(f"\n🔍 [0/{max_depth}] Esploro: {base_url} (Profondità: {max_depth})")
 
     for depth in range(max_depth + 1):
         urls_to_crawl = list(set([u for u in current_level_urls if u not in global_visited]))
@@ -114,7 +116,7 @@ async def process_site(crawler, session, site, global_visited):
         if not urls_to_crawl:
             break
             
-        print(f"   ➔ Livello {depth}: elaborazione parallela di {len(urls_to_crawl)} URL...")
+        print(f"   ➔ [{depth}/{max_depth}] Livello {depth}: elaborazione parallela di {len(urls_to_crawl)} URL...")
         
         for u in urls_to_crawl:
             global_visited.add(u)
@@ -128,8 +130,16 @@ async def process_site(crawler, session, site, global_visited):
         for result in results:
             if not result.success:
                 continue
+
+            if "docenti.unisa.it" in result.url and result.url.rstrip("/") != "https://docenti.unisa.it":
+                html_lower = (result.html or "").lower()
+                
+                is_diem = "diem" in html_lower or "informazione ed elettrica" in html_lower
+                
+                if not is_diem:
+                    print(f"   ➔ [{depth}/{max_depth}] [SKIPPED] Docente di un altro dipartimento: {result.url}")
+                    continue
             
-            # 1. Salva la pagina Web
             md_content = result.markdown
             
             if md_content:
@@ -142,9 +152,9 @@ async def process_site(crawler, session, site, global_visited):
                         f.write(f"---\nsource: {result.url}\ntype: webpage\n---\n\n")
                         f.write(clean_md)
                 else:
-                    print(f"  [SKIPPED] Testo troppo corto ({len(clean_md)} char): {result.url}")
+                    print(f"   ➔ [{depth}/{max_depth}] [SKIPPED] Testo troppo corto ({len(clean_md)} char): {result.url}")
             else:
-                print(f"  [SKIPPED] Markdown vuoto: {result.url}")
+                print(f"   ➔ [{depth}/{max_depth}] [SKIPPED] Markdown vuoto: {result.url}")
                 
             
             if depth < max_depth:
@@ -164,8 +174,8 @@ async def process_site(crawler, session, site, global_visited):
                                 next_level_urls.add(absolute_url)
         
         if pdf_urls_to_process:
-            print(f"   ➔ Trovati {len(pdf_urls_to_process)} PDF. Download e parsing in corso...")
-            pdf_tasks = [process_pdf(pdf_url, session, global_visited, source_page) for pdf_url, source_page in pdf_urls_to_process]
+            print(f"   ➔ [{depth}/{max_depth}] Trovati {len(pdf_urls_to_process)} PDF. Download e parsing in corso...")
+            pdf_tasks = [process_pdf(pdf_url, session, global_visited, source_page, depth, max_depth) for pdf_url, source_page in pdf_urls_to_process]
             await asyncio.gather(*pdf_tasks)
 
         current_level_urls = list(next_level_urls)
