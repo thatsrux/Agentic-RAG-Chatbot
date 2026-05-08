@@ -1,0 +1,9 @@
+---
+source: https://corsi.unisa.it/uploads/rescue/499/9508/syllabusita-testaccesso-lm28-electricalengineeringfordigitalenergy-v3.pdf
+found_in: https://corsi.unisa.it/electrical-engineering-for-digital-energy/immatricolazioni
+type: pdf
+---
+
+Università degli Studi di Salerno Dipartimento di Ingegneria dell'Informazione  ed Elettrica e Matematica Applicata  
+1  
+ SYLLABUS DELLA PROVA DI VERIFICA PER L’ACCESSO AL CORSO DI LAUREA MAGISTRALE IN  ELECTRICAL ENGINEERING FOR DIGITAL ENERGY ANNO ACCADEMICO 2023/2024   Discipline di Base MATEMATICA - Funzioni e calcolo differenziale di una e più variabili reali. Vettori nel piano e nello spazio euclideo; spazi vettoriali. Sistemi lineari. Calcolo integrale. Numeri complessi. Algebra delle matrici. Autovalori ed autovettori. Analisi complessa.  FISICA - Cinematica. Dinamica del punto e dei sistemi di particelle. Lavoro ed energia. Dinamica del corpo rigido. Gravità. Campi elettrici. Corrente elettrica e circuiti. Campi magnetici. Induzione elettromagnetica.  Discipline Ingegneristiche e Caratterizzanti  ELETTROTECNICA - Metodi per lo studio di circuiti elettrici lineari tempo invarianti nel dominio del tempo e della frequenza – Metodo fasoriale - Analisi di semplici filtri.  Analisi di circuiti resistivi e circuiti dinamici del primo ordine - Analisi in potenza di circuiti lineari operanti in regime sinusoidale. Principi di funzionamento di strumenti per la misura di grandezze elettriche.  INFORMATICA - Fondamenti della programmazione strutturata - Strutture dati di base: vettori, matrici, strutture, - Algoritmi di ordinamento e ricerca. Strutture dati fondamentali: pile, code, liste. - Architettura di un calcolatore: CPU, memoria, dispositivi di I/O. – Struttura di un Sistema Operativo.     

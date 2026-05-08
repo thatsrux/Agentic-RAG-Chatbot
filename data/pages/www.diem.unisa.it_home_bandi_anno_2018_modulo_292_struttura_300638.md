@@ -1,0 +1,125 @@
+---
+source: https://www.diem.unisa.it/home/bandi?anno=2018&modulo=292&struttura=300638
+type: webpage
+---
+
+[skip to main content](https://www.diem.unisa.it#unisa-content)
+[ ](http://www.diem.unisa.it "Home")
+Condividi
+  1. [](https://www.diem.unisa.it "DIEM")
+  2. [Home](https://www.diem.unisa.it/home "Home")
+  3. [Bandi](https://www.diem.unisa.it/home/bandi "Bandi")
+
+
+#  Home | Bandi Borse di Ricerca
+## Home Bandi Borse di Ricerca
+Anno 2018 
+  * [2026](https://www.diem.unisa.it/home/bandi?anno=2026&struttura=300638&modulo=292)
+  * [2025](https://www.diem.unisa.it/home/bandi?anno=2025&struttura=300638&modulo=292)
+  * [2024](https://www.diem.unisa.it/home/bandi?anno=2024&struttura=300638&modulo=292)
+  * [2023](https://www.diem.unisa.it/home/bandi?anno=2023&struttura=300638&modulo=292)
+  * [2022](https://www.diem.unisa.it/home/bandi?anno=2022&struttura=300638&modulo=292)
+  * [2021](https://www.diem.unisa.it/home/bandi?anno=2021&struttura=300638&modulo=292)
+  * [2020](https://www.diem.unisa.it/home/bandi?anno=2020&struttura=300638&modulo=292)
+  * [2019](https://www.diem.unisa.it/home/bandi?anno=2019&struttura=300638&modulo=292)
+  * [2018](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300638&modulo=292)
+  * [2017](https://www.diem.unisa.it/home/bandi?anno=2017&struttura=300638&modulo=292)
+  * [2016](https://www.diem.unisa.it/home/bandi?anno=2016&struttura=300638&modulo=292)
+  * [2015](https://www.diem.unisa.it/home/bandi?anno=2015&struttura=300638&modulo=292)
+  * [2014](https://www.diem.unisa.it/home/bandi?anno=2014&struttura=300638&modulo=292)
+  * [2013](https://www.diem.unisa.it/home/bandi?anno=2013&struttura=300638&modulo=292)
+
+
+Dipartimento di Ingegneria dell\'Informazione ed Elettrica e Matematica applicata/DIEM 
+  * [Dipartimento di Chimica e Biologia "Adolfo Zambelli"/DCB](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300389&modulo=292)
+  * [Dipartimento di Farmacia/DIFARMA](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300390&modulo=292)
+  * [Dipartimento di Fisica "E.R.Caianiello"/DF](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300391&modulo=292)
+  * [Dipartimento di Informatica/DI](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300392&modulo=292)
+  * [Dipartimento di Ingegneria Civile/DICIV](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300393&modulo=292)
+  * [Dipartimento di Ingegneria dell'Informazione ed Elettrica e Matematica applicata/DIEM](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300638&modulo=292)
+  * [Dipartimento di Ingegneria Industriale/DIIN](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300395&modulo=292)
+  * [Dipartimento di Matematica/DIPMAT](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300396&modulo=292)
+  * [Dipartimento di Medicina, Chirurgia e Odontoiatria "Scuola Medica Salernitana"/DIPMED](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300397&modulo=292)
+  * [Dipartimento di Scienze Aziendali - Management & Innovation Systems/DISA-MIS](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300639&modulo=292)
+  * [Dipartimento di Scienze del Patrimonio Culturale/DISPAC](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300398&modulo=292)
+  * [Dipartimento di Scienze Economiche e Statistiche/DISES](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300399&modulo=292)
+  * [Dipartimento di Scienze Giuridiche (Scuola di Giurisprudenza)](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300400&modulo=292)
+  * [Dipartimento di Scienze Politiche e della Comunicazione/DISPC](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300401&modulo=292)
+  * [Dipartimento di Scienze Umane, Filosofiche e della Formazione/DISUFF](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300402&modulo=292)
+  * [Dipartimento di Studi Politici e Sociali/DISPS](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300663&modulo=292)
+  * [Dipartimento di Studi Umanistici/DIPSUM](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=300404&modulo=292)
+  * [Struttura Esterna](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=EST&modulo=292)
+  * [Più Strutture](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=more&modulo=292)
+  * [NESSUNA STRUTTURA](https://www.diem.unisa.it/home/bandi?anno=2018&struttura=000000&modulo=292)
+  * [Tutte le Strutture](https://www.diem.unisa.it/home/bandi?anno=2018&modulo=292)
+
+
+  
+
+Copia Link
+share
+[Bando di concorso per il conferimento di n. 2 borse di studio finalizzate allo svolgimento di attività di ricerca sul progetto POWER-ONE](https://www.diem.unisa.it/home/bandi?anno=2018&modulo=292&bando=1441)  
+|   | Struttura  | **Dipartimento di Ingegneria dell\'Informazione ed Elettrica e Matematica applicata/DIEM**  |  
+| --- | --- | --- |  
+|   | Scadenza  |  **20 Marzo 2018** SCADUTO  |  
+|   | Numero Posti  | **2**  |  
+|   | Protocollo  | n. 67453 del 28 Febbraio 2018  |  
+|   | [Bando e Modello di Domanda](https://www.diem.unisa.it/uploads/rescue/292/1441/BandoBorse-Power-One-Femia.pdf)  |  [PDF](https://www.diem.unisa.it/uploads/rescue/292/1441/BandoBorse-Power-One-Femia.pdf)Altri formati  |  
+| --- | --- | --- |  
+Copia Link
+share
+[Bando di concorso per il conferimento di n. 1 borsa di studio finalizzata allo svolgimento di attività di ricerca nell'ambito del Dipartimento di Ingegneria dell'Informazione ed Elettrica e Matematica Applicata - DIEM](https://www.diem.unisa.it/home/bandi?anno=2018&modulo=292&bando=1404)  
+|   | Titolo  | **Le scienze della comunicazione applicate al trasferimento tecnologico**  |  
+| --- | --- | --- |  
+|   | Struttura  | **Dipartimento di Ingegneria dell\'Informazione ed Elettrica e Matematica applicata/DIEM**  |  
+|   | Scadenza  |  **9 Marzo 2018 alle ore 13:00** SCADUTO  |  
+|   | Numero Posti  | **1**  |  
+|   | Protocollo  | n. 42443 del 7 Febbraio 2018  |  
+|   | [Bando e Modello di Domanda](https://www.diem.unisa.it/uploads/rescue/292/1404/BandoBorsa-08022018-M.Vento.pdf)  |  [PDF](https://www.diem.unisa.it/uploads/rescue/292/1404/BandoBorsa-08022018-M.Vento.pdf)Altri formati  |  
+| --- | --- | --- |  
+Copia Link
+share
+[Bando di concorso per il conferimento di n. 1 borsa di studio finalizzata allo svolgimento di attività di ricerca dal titolo "Approcci computazionali e tecniche basate sul paradigma della situation awareness per il supporto alle decisioni" - SSD ING-INF/05](https://www.diem.unisa.it/home/bandi?anno=2018&modulo=292&bando=1337)  
+|   | Titolo  | **Approcci computazionali e tecniche basate sul paradigma della situation awareness per il supporto alle decisioni**  |  
+| --- | --- | --- |  
+|   | Struttura  | **Dipartimento di Ingegneria dell\'Informazione ed Elettrica e Matematica applicata/DIEM**  |  
+|   | Scadenza  |  **11 Gennaio 2018 alle ore 13:00** SCADUTO  |  
+|   | Numero Posti  | **1**  |  
+|   | Protocollo  | n. 244021 del 12 Dicembre 2017  |  
+|   | [Bando e Modello di Domanda](https://www.diem.unisa.it/uploads/rescue/292/1337/BandoBorsaprot.n.244021Gaeta.pdf)  |  [PDF](https://www.diem.unisa.it/uploads/rescue/292/1337/BandoBorsaprot.n.244021Gaeta.pdf)Altri formati  |  
+| --- | --- | --- |  
+Copia Link
+share
+[Bando di concorso per il conferimento di n. 1 borsa di studio finalizzata allo svolgimento di attività di ricerca dal titolo "Attività di ricerca all'analisi e valutazione d'impatto delle reti sociali" - SSD SPS/08 - SECS P/08 - SPS04](https://www.diem.unisa.it/home/bandi?anno=2018&modulo=292&bando=1336)  
+|   | Titolo  | **Attività di ricerca all'analisi e valutazione d'impatto delle reti sociali**  |  
+| --- | --- | --- |  
+|   | Struttura  | **Dipartimento di Ingegneria dell\'Informazione ed Elettrica e Matematica applicata/DIEM**  |  
+|   | Scadenza  |  **11 Gennaio 2018 alle ore 13:00** SCADUTO  |  
+|   | Numero Posti  | **1**  |  
+|   | Protocollo  | n. 244141 del 12 Dicembre 2017  |  
+|   | [Bando e Modello di Domanda](https://www.diem.unisa.it/uploads/rescue/292/1336/BandoBorsaDIEMprot.n.244141Auletta.pdf)  |  [PDF](https://www.diem.unisa.it/uploads/rescue/292/1336/BandoBorsaDIEMprot.n.244141Auletta.pdf)Altri formati  |  
+| --- | --- | --- |  
+Copia Link
+share
+[Bando di concorso per il conferimento di n. 1 borsa di studio finalizzata allo svolgimento di attività di ricerca dal titolo "Stima dell'età e classificazione di genere a partire da immagini di volto" - SSD ING-INF/05](https://www.diem.unisa.it/home/bandi?anno=2018&modulo=292&bando=1335)  
+|   | Titolo  | **Stima dell'età e classificazione di genere a partire da immagini di volto**  |  
+| --- | --- | --- |  
+|   | Struttura  | **Dipartimento di Ingegneria dell\'Informazione ed Elettrica e Matematica applicata/DIEM**  |  
+|   | Scadenza  |  **8 Gennaio 2018 alle ore 13:00** SCADUTO  |  
+|   | Numero Posti  | **1**  |  
+|   | Protocollo  | n. 243209 del 11 Dicembre 2017  |  
+|   | [Bando e Modello di Domanda](https://www.diem.unisa.it/uploads/rescue/292/1335/BandoBorsadiemn.243209Vento.pdf)  |  [PDF](https://www.diem.unisa.it/uploads/rescue/292/1335/BandoBorsadiemn.243209Vento.pdf)Altri formati  |  
+| --- | --- | --- |  
+![Bandi Borse di Ricerca](https://www.diem.unisa.it/rescue/img/highlights_default.jpg)
+  * Home
+
+
+  * [News ](https://www.diem.unisa.it/home/news)
+  * [Eventi ](https://www.diem.unisa.it/home/eventi)
+  * [Bandi ](https://www.diem.unisa.it/home/bandi)
+  * [Contatti ](https://www.diem.unisa.it/home/contatti)
+
+
+  
+
+[Vai al Contenuto della Pagina](https://www.diem.unisa.it#unisa-content)[Vai al Menu Principale di Navigazione](https://www.diem.unisa.it#main-menu-collapse-1)[Vai al Menu Secondario di Navigazione](https://www.diem.unisa.it#unisa-left-menu)
