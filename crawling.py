@@ -19,7 +19,7 @@ os.makedirs(PDFS_DIR, exist_ok=True)
 
 TARGET_SITES = [
     {"url": "https://www.diem.unisa.it/", "max_depth": 3},
-    #{"url": "https://docenti.unisa.it/", "max_depth": 3},
+    {"url": "https://docenti.unisa.it/", "max_depth": 2},
     {"url": "https://corsi.unisa.it/ingegneria-dell-informazione-per-la-medicina-digitale", "max_depth": 3},
     {"url": "https://corsi.unisa.it/ingegneria-informatica", "max_depth": 3},
     {"url": "https://corsi.unisa.it/electrical-engineering-for-digital-energy", "max_depth": 3},
@@ -149,16 +149,18 @@ async def process_site(crawler, session, site, global_visited):
             
             if depth < max_depth:
                 internal_links = result.links.get("internal", [])
+                external_links = result.links.get("external", [])
+                all_links = internal_links + external_links
                 
-                for link_obj in internal_links:
+                for link_obj in all_links:
                     href = link_obj.get("href")
                     if href:
                         absolute_url = urljoin(result.url, href).split("#")[0] 
                         
-                        if get_domain(absolute_url) == base_domain:
-                            if "pdf" in absolute_url.lower():
-                                pdf_urls_to_process.add((absolute_url, result.url))
-                            else:
+                        if ".pdf" in absolute_url.lower():
+                            pdf_urls_to_process.add((absolute_url, result.url))
+                        else:
+                            if absolute_url.startswith(base_url):
                                 next_level_urls.add(absolute_url)
         
         if pdf_urls_to_process:
