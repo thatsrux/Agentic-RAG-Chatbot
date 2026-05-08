@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import aiohttp
 import io
+import re
 from pypdf import PdfReader
 from urllib.parse import urlparse, urljoin
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
@@ -33,11 +34,20 @@ def get_domain(url):
     return urlparse(url).netloc
 
 def generate_safe_filename(url, is_pdf):
-    """Genera un nome file sicuro usando un hash MD5."""
-    url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()[:12]
-    safe_name = url.replace("https://", "").replace("http://", "").split("/")[0]
+    """Genera un nome file usando l'URL completo, sostituendo i caratteri non ammessi dall'OS."""
+    clean_url = url.replace("https://", "").replace("http://", "")
+    
+    safe_name = re.sub(r'[\/\\?%*:|"<>&=]+', '_', clean_url)
+    
+    safe_name = safe_name.strip('_')
+    
+    if len(safe_name) > 200:
+        url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()[:8]
+        safe_name = safe_name[:190] + "_" + url_hash
+        
     ext = ".md"
-    return f"{safe_name}_{url_hash}{ext}"
+    
+    return f"{safe_name}{ext}"
 
 async def process_pdf(url, session, global_visited, source_page):
     """Scarica ed estrae il testo da un PDF in modo asincrono."""
@@ -90,8 +100,8 @@ async def process_site(crawler, session, site, global_visited):
 
     config = CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
-        word_count_threshold=20,
-        exclude_external_links=False,
+        word_count_threshold=0,
+        exclude_external_links=True,
         excluded_tags=['nav', 'footer', 'header', 'aside', 'form', 'noscript'],
         js_code=[js_cleanup] 
     )
@@ -119,18 +129,24 @@ async def process_site(crawler, session, site, global_visited):
             if not result.success:
                 continue
             
-            # 1. Salva la pagina Web pulita
+            # 1. Salva la pagina Web
             md_content = result.markdown
             
-            if md_content and len(md_content.strip()) > 100:
-                filename = generate_safe_filename(result.url, is_pdf=False)
-                save_path = os.path.join(PAGES_DIR, filename)
+            if md_content:
+                clean_md = md_content.strip()
+                if len(clean_md) > 10:
+                    filename = generate_safe_filename(result.url, is_pdf=False)
+                    save_path = os.path.join(PAGES_DIR, filename)
+                    
+                    with open(save_path, "w", encoding="utf-8") as f:
+                        f.write(f"---\nsource: {result.url}\ntype: webpage\n---\n\n")
+                        f.write(clean_md)
+                else:
+                    print(f"  [SKIPPED] Testo troppo corto ({len(clean_md)} char): {result.url}")
+            else:
+                print(f"  [SKIPPED] Markdown vuoto: {result.url}")
                 
-                with open(save_path, "w", encoding="utf-8") as f:
-                    f.write(f"---\nsource: {result.url}\ntype: webpage\n---\n\n")
-                    f.write(md_content)
             
-            # 2. Estrai i link per il livello successivo
             if depth < max_depth:
                 internal_links = result.links.get("internal", [])
                 
@@ -140,7 +156,7 @@ async def process_site(crawler, session, site, global_visited):
                         absolute_url = urljoin(result.url, href).split("#")[0] 
                         
                         if get_domain(absolute_url) == base_domain:
-                            if absolute_url.lower().endswith(".pdf"):
+                            if "pdf" in absolute_url.lower():
                                 pdf_urls_to_process.add((absolute_url, result.url))
                             else:
                                 next_level_urls.add(absolute_url)
