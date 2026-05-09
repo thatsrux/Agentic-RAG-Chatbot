@@ -75,7 +75,7 @@ def cerca_docente(nome_docente: str) -> str:
     """
     Cerca informazioni su un docente del DIEM: contatti, email,
     orari di ricevimento, ruolo, settore scientifico-disciplinare.
-    Accetta il nome e cognome.
+    Accetta il nome e cognome o solo il cognome.
     """
     parti_nome_lower = [p.lower() for p in nome_docente.strip().split()]
     docs_validi = []
@@ -92,7 +92,7 @@ def cerca_docente(nome_docente: str) -> str:
                         break
                 
                 if titolo_h1 and all(parte in titolo_h1 for parte in parti_nome_lower):
-                    docs_validi.append(f"FONTE: ({source})\n{doc}")
+                    docs_validi.append(f"=== FRAMMENTO ===\nURL_DA_CITARE: {source}\nCONTENUTO:\n{doc}\n=================")
 
     parti = nome_docente.strip().split()
     varianti = [nome_docente]
@@ -100,16 +100,23 @@ def cerca_docente(nome_docente: str) -> str:
     if len(parti) == 2:
         p1, p2 = parti[0], parti[1]
         varianti.extend([
-            f"{p2} {p1}",                  # Invertito originale
-            f"{p2.title()} {p1.title()}",  # Es. Alessia Saggese
-            f"{p2.title()} {p1.upper()}",  # Es. Alessia SAGGESE
-            f"{p1.title()} {p2.title()}",  # Es. Saggese Alessia
-            f"{p1.title()} {p2.upper()}"   # Es. Saggese ALESSIA
+            f"{p2} {p1}",
+            f"{p2.title()} {p1.title()}",
+            f"{p2.title()} {p1.upper()}",
+            f"{p1.title()} {p2.title()}",
+            f"{p1.title()} {p2.upper()}"
+        ])
+    elif len(parti) == 1:
+        p1 = parti[0]
+        varianti.extend([
+            p1.title(),
+            p1.upper(),
+            p1.lower()
         ])
 
+    varianti = list(set(varianti))
+
     for variante in varianti:
-        if docs_validi:
-            break
         esatti = vector_db.get(where_document={"$contains": variante})
         if esatti and esatti.get("documents"):
             filtra_vero_docente(esatti["documents"], esatti["metadatas"])
@@ -120,10 +127,26 @@ def cerca_docente(nome_docente: str) -> str:
 
     if docs_validi:
         docs_univoci = list(dict.fromkeys(docs_validi))
-        return "DATI TROVATI. Leggi attentamente queste informazioni, elabora una risposta discorsiva completa e poi aggiungi le fonti alla fine:\n\n" + "\n\n---\n\n".join(docs_univoci[:8])
+        
+        homepage_docs = []
+        altri_docs = []
+        for doc in docs_univoci:
+            if re.search(r'docenti\.unisa\.it/\d+(?:/home)?\)', doc.lower()):
+                homepage_docs.append(doc)
+            else:
+                altri_docs.append(doc)
+                
+        docs_finali = homepage_docs + altri_docs
+        
+        testo_ritorno = (
+            "DATI TROVATI. Leggi i frammenti qui sotto. "
+            "Se l'utente chiede una info specifica (es. curriculum), estrai i dati SOLO dal frammento con l'URL corrispondente. "
+            "DEVI concludere la risposta inserendo l'URL_DA_CITARE esatto.\n\n"
+        )
+        return testo_ritorno + "\n\n".join(docs_finali[:8])
+        
     else:
         return f"ERRORE ASSOLUTO: Non esiste una pagina ufficiale per '{nome_docente}'. NON INVENTARE NULLA. NON INVENTARE LINK FALSI. Rispondi all'utente dicendo che non hai trovato il suo profilo nel database docenti."
-    
 
 @tool
 def cerca_corso(query: str) -> str:
@@ -200,13 +223,14 @@ TOOLS = [
 SYSTEM_PROMPT = """Sei l'assistente ufficiale del DIEM dell'Università di Salerno.
 
 Regole FONDAMENTALI (da rispettare rigorosamente):
-1. ZERO INVENZIONI: Non usare mai la tua memoria interna. Se un tool restituisce un errore o non ci sono dati, dichiara che non hai le informazioni e ASSOLUTAMENTE NON INVENTARE LINK WEB FALSI (es. non usare www.unisa.it/pagina/...).2. SINTESI RICCA E DETTAGLIATA: Quando il tool ti fornisce dei dati su un docente o un corso, DEVI usare TUTTI i frammenti ricevuti per costruire un profilo testuale completo (ruolo, curriculum, progetti, orari).
-3. STRUTTURA DELLA RISPOSTA: La tua risposta deve seguire questo ordine (SE POSSIBILE):
-   - Paragrafo introduttivo e discorsivo (es. "Pierluigi Ritrovato è professore...").
-   - Elenco dei dettagli rilevanti (usa elenchi puntati per orari, insegnamenti, o progetti, NON AGGIUNGERE UN PUNTO ALL'ELENCO SE NON COMPLETO).
-   - Le fonti esatte fornite dal tool.
-4. FONTI OBBLIGATORIE: Concludi SEMPRE copiando i link forniti dal tool usando il formato Markdown: (URL). Non ometterli mai e non usare altri link.
-5. VIETATO ARRENDERSI: È SEVERAMENTE VIETATO dire "Non ho trovato informazioni" se il tool ti ha passato del testo, anche se parziale. Rispondi in italiano.
+1. ZERO INVENZIONI: Non usare mai la tua memoria interna. Se un tool restituisce un errore, dichiara che non hai le informazioni e ASSOLUTAMENTE NON INVENTARE LINK.
+2. FILTRO URL (FONDAMENTALE): Riceverai vari frammenti di testo separati da "===" con relativi URL. 
+   - Se l'utente chiede il "curriculum", leggi e riassumi ESCLUSIVAMENTE il frammento che contiene "/curriculum" nell'URL. Ignora completamente il frammento "/home" (quindi niente stanze, telefoni o orari).
+   - Se l'utente chiede "orari" o contatti, riassumi ESCLUSIVAMENTE il frammento "/home".
+   - Se l'utente fa una domanda generale ("Chi è?"), unisci le informazioni.
+3. CITAZIONE OBBLIGATORIA: È un obbligo assoluto concludere la tua risposta con: "Fonte: [URL]". Sostituisci URL con l'URL_DA_CITARE del frammento che hai effettivamente letto.
+4. STRUTTURA E CONTROLLO LOGICO: Usa un paragrafo discorsivo iniziale e poi elenchi puntati. DEVI assicurarti che ogni punto dell'elenco sia una frase di senso compiuto. Non stampare MAI frasi troncate o monche.
+5. VIETATO ARRENDERSI: È SEVERAMENTE VIETATO dire "Non ho trovato informazioni" se il tool ti ha passato del testo utile a rispondere. Rispondi in italiano.
 """
 
 prompt = ChatPromptTemplate.from_messages([
