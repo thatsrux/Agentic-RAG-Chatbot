@@ -2,6 +2,7 @@
 *.pdf
 *.md
 *.txt
+markdown_estratti/
 
 # Ignore serialized / binary files
 *.pickle
