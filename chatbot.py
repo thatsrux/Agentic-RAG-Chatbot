@@ -1,5 +1,6 @@
 import os
 import gradio as gr
+import re
 from dotenv import load_dotenv
 
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -29,6 +30,11 @@ vector_db = Chroma(
     persist_directory=CHROMA_PATH,
 )
 
+#print("=" * 20 + " PROVA " + "=" * 20)
+#print(vector_db.get(where_document = {"$contains": "Mario Vento"}, limit=1))
+
+
+
 def search_vector(query: str, source_filter: str = None, k: int = 5) -> str:
     """Ricerca vettoriale con filtro manuale in Python (più sicuro dei metadati Chroma)."""
     
@@ -55,9 +61,9 @@ def search_vector(query: str, source_filter: str = None, k: int = 5) -> str:
         found_in = doc.metadata.get("found_in", "")
         
         if "pdf" in doc.metadata.get("type", "") and found_in:
-            meta_info = f"[Fonte PDF: {source_url} (Trovato in: {found_in})]"
+            meta_info = f"[Fonte PDF]({source_url}) (Trovato in: {found_in})"
         else:
-            meta_info = f"[Fonte Web: {source_url}]"
+            meta_info = f"[Fonte Web]({source_url})"
             
         formatted_results.append(f"{meta_info}\n{doc.page_content}")
         
@@ -71,15 +77,53 @@ def cerca_docente(nome_docente: str) -> str:
     orari di ricevimento, ruolo, settore scientifico-disciplinare.
     Accetta il nome e cognome.
     """
-    risultati_nome = search_vector(nome_docente, source_filter="docenti.unisa.it", k=6)
+    parti_nome_lower = [p.lower() for p in nome_docente.strip().split()]
+    docs_validi = []
     
-    if "Nessuna informazione" in risultati_nome:
-        parti = nome_docente.split()
-        if len(parti) == 2:
-            nome_invertito = f"{parti[1]} {parti[0]}"
-            return search_vector(nome_invertito, source_filter="docenti.unisa.it", k=6)
+    def filtra_vero_docente(docs, metas):
+        for doc, meta in zip(docs, metas):
+            source = meta.get("source", meta.get("local_file", "Fonte sconosciuta"))
             
-    return risultati_nome
+            if "docenti.unisa.it" in source:
+                titolo_h1 = ""
+                for riga in doc.split('\n')[:40]:
+                    if riga.strip().startswith('# '):
+                        titolo_h1 = riga.lower()
+                        break
+                
+                if titolo_h1 and all(parte in titolo_h1 for parte in parti_nome_lower):
+                    docs_validi.append(f"FONTE: ({source})\n{doc}")
+
+    parti = nome_docente.strip().split()
+    varianti = [nome_docente]
+    
+    if len(parti) == 2:
+        p1, p2 = parti[0], parti[1]
+        varianti.extend([
+            f"{p2} {p1}",                  # Invertito originale
+            f"{p2.title()} {p1.title()}",  # Es. Alessia Saggese
+            f"{p2.title()} {p1.upper()}",  # Es. Alessia SAGGESE
+            f"{p1.title()} {p2.title()}",  # Es. Saggese Alessia
+            f"{p1.title()} {p2.upper()}"   # Es. Saggese ALESSIA
+        ])
+
+    for variante in varianti:
+        if docs_validi:
+            break
+        esatti = vector_db.get(where_document={"$contains": variante})
+        if esatti and esatti.get("documents"):
+            filtra_vero_docente(esatti["documents"], esatti["metadatas"])
+
+    if not docs_validi:
+        ris_semantici = vector_db.similarity_search(nome_docente, k=15)
+        filtra_vero_docente([d.page_content for d in ris_semantici], [d.metadata for d in ris_semantici])
+
+    if docs_validi:
+        docs_univoci = list(dict.fromkeys(docs_validi))
+        return "DATI TROVATI. Leggi attentamente queste informazioni, elabora una risposta discorsiva completa e poi aggiungi le fonti alla fine:\n\n" + "\n\n---\n\n".join(docs_univoci[:8])
+    else:
+        return f"ERRORE ASSOLUTO: Non esiste una pagina ufficiale per '{nome_docente}'. NON INVENTARE NULLA. NON INVENTARE LINK FALSI. Rispondi all'utente dicendo che non hai trovato il suo profilo nel database docenti."
+    
 
 @tool
 def cerca_corso(query: str) -> str:
@@ -155,12 +199,14 @@ TOOLS = [
 
 SYSTEM_PROMPT = """Sei l'assistente ufficiale del DIEM dell'Università di Salerno.
 
-Regole FONDAMENTALI:
-1. DEVI SEMPRE USARE I TOOL per cercare le informazioni prima di rispondere. Non usare la tua memoria interna per dati sui corsi o sui docenti.
-2. Quando il tool ti restituisce delle informazioni, esse includeranno la fonte [Fonte: URL]. MENTZIONA SEMPRE IL LINK della fonte nella tua risposta finale per permettere all'utente di approfondire.
-3. Se un tool non restituisce dati utili, dichiaralo chiaramente all'utente senza inventare nulla.
-4. Usa la formattazione Markdown (elenchi, grassetti, tabelle) per rendere la lettura chiara e pulita.
-5. Mantieni un tono istituzionale ma cordiale. Rispondi in italiano.
+Regole FONDAMENTALI (da rispettare rigorosamente):
+1. ZERO INVENZIONI: Non usare mai la tua memoria interna. Se un tool restituisce un errore o non ci sono dati, dichiara che non hai le informazioni e ASSOLUTAMENTE NON INVENTARE LINK WEB FALSI (es. non usare www.unisa.it/pagina/...).2. SINTESI RICCA E DETTAGLIATA: Quando il tool ti fornisce dei dati su un docente o un corso, DEVI usare TUTTI i frammenti ricevuti per costruire un profilo testuale completo (ruolo, curriculum, progetti, orari).
+3. STRUTTURA DELLA RISPOSTA: La tua risposta deve seguire questo ordine (SE POSSIBILE):
+   - Paragrafo introduttivo e discorsivo (es. "Pierluigi Ritrovato è professore...").
+   - Elenco dei dettagli rilevanti (usa elenchi puntati per orari, insegnamenti, o progetti, NON AGGIUNGERE UN PUNTO ALL'ELENCO SE NON COMPLETO).
+   - Le fonti esatte fornite dal tool.
+4. FONTI OBBLIGATORIE: Concludi SEMPRE copiando i link forniti dal tool usando il formato Markdown: (URL). Non ometterli mai e non usare altri link.
+5. VIETATO ARRENDERSI: È SEVERAMENTE VIETATO dire "Non ho trovato informazioni" se il tool ti ha passato del testo, anche se parziale. Rispondi in italiano.
 """
 
 prompt = ChatPromptTemplate.from_messages([
