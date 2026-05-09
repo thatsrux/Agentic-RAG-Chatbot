@@ -154,37 +154,54 @@ def cerca_corso(query: str) -> str:
     Cerca informazioni su corsi di laurea, piani di studio, syllabus,
     requisiti di ammissione, punteggi TOLC e immatricolazione al DIEM.
     """
-    return search_vector(query, source_filter="corsi.unisa.it", k=5)
+    # Utilizziamo una ricerca espansa per catturare i vari moduli del corso
+    risultati_raw = vector_db.similarity_search(query, k=10)
+    
+    docs_validi = []
+    for doc in risultati_raw:
+        source = doc.metadata.get("source", doc.metadata.get("local_file", ""))
+        # Filtriamo per assicurarci che provenga dal portale corsi
+        if "corsi.unisa.it" in source.lower():
+            docs_validi.append(f"=== FRAMMENTO ===\nURL_DA_CITARE: {source}\nCONTENUTO:\n{doc.page_content}\n=================")
+
+    if not docs_validi:
+        return f"Nessuna informazione ufficiale trovata per la query: {query}"
+
+    testo_ritorno = (
+        "DATI TROVATI SUI CORSI. Leggi i frammenti qui sotto. "
+        "Se l'utente chiede dei requisiti di ammissione, usa i frammenti con '/iscriversi' o '/ammissione'. "
+        "Se chiede del piano di studio, usa i frammenti con '/didattica'. "
+        "REGOLA VITALE: Rispondi in modo ESTREMAMENTE MIRATO. Non aggiungere info su tasse o date se l'utente ha chiesto solo il syllabus. "
+        "Assicurati che ogni punto dell'elenco sia una frase compiuta. "
+        "Concludi con: Fonte: [URL_DA_CITARE].\n\n"
+    )
+    return testo_ritorno + "\n\n".join(docs_validi[:6])
 
 @tool
 def cerca_info_diem(query: str) -> str:
     """
-    Cerca informazioni generali sul DIEM: sede, laboratori, dotazioni, aree di ricerca,
-    commissioni, strutture, eventi, bandi e documenti ufficiali.
+    Cerca informazioni generali sul DIEM: membri di commissioni, sede, laboratori, 
+    aree di ricerca, strutture, eventi e documenti ufficiali.
     """
-    seen = set()
-    docs = []
+    vec_docs_web = vector_db.similarity_search(query, k=5, filter={"type": "webpage"})
+    vec_docs_pdf = vector_db.similarity_search(query, k=3, filter={"type": "pdf"})
     
-    vec_docs_web = vector_db.similarity_search(
-        query, k=4,
-        filter={"source": {"$contains": "diem.unisa.it"}}
-    )
-    
-    vec_docs_pdf = vector_db.similarity_search(
-        query, k=2,
-        filter={"type": "pdf"}
-    )
-    
+    docs_validi = []
     for doc in vec_docs_web + vec_docs_pdf:
-        if doc.page_content not in seen:
-            seen.add(doc.page_content)
-            source_url = doc.metadata.get("source", "Fonte sconosciuta")
-            docs.append(f"[Fonte: {source_url}]\n{doc.page_content}")
-            
-    if not docs:
-        return "Nessuna informazione trovata nel database."
-        
-    return "\n\n---\n\n".join(docs[:6])
+        source = doc.metadata.get("source", "Fonte sconosciuta")
+        if "diem.unisa.it" in source.lower() or doc.metadata.get("type") == "pdf":
+            docs_validi.append(f"=== FRAMMENTO ===\nURL_DA_CITARE: {source}\nCONTENUTO:\n{doc.page_content}\n=================")
+
+    if not docs_validi:
+        return "Nessuna informazione istituzionale trovata sul DIEM per questa richiesta."
+
+    testo_ritorno = (
+        "DATI DI DIPARTIMENTO TROVATI. "
+        "ATTENZIONE TABELLE: Se i dati sono in una tabella (es. membri commissione), leggi riga per riga e riporta i nomi esatti. "
+        "COERENZA ESTREMA: Se l'utente chiede i membri, elenca Nomi, Cognomi e Ruoli. Non inventare nomi generici. "
+        "Concludi con: Fonte: [URL_DA_CITARE].\n\n"
+    )
+    return testo_ritorno + "\n\n".join(docs_validi[:6])
 
 @tool
 def cerca_internazionale(query: str) -> str:
@@ -192,32 +209,92 @@ def cerca_internazionale(query: str) -> str:
     Cerca informazioni su mobilità internazionale, programmi Erasmus+,
     accordi con università straniere e referenti per l'internazionalizzazione.
     """
-    return search_vector(f"internazionale erasmus mobilità {query}", k=5)
+    query_espansa = f"internazionale erasmus mobilità exchange {query}"
+    risultati = vector_db.similarity_search(query_espansa, k=6)
+    
+    docs_validi = []
+    for doc in risultati:
+        source = doc.metadata.get("source", "")
+        docs_validi.append(f"=== FRAMMENTO ===\nURL_DA_CITARE: {source}\nCONTENUTO:\n{doc.page_content}\n=================")
+
+    testo_ritorno = (
+        "DATI INTERNAZIONALIZZAZIONE. "
+        "Distingui accuratamente tra istruzioni per studenti in uscita (Erasmus Outgoing) e studenti stranieri (Incoming). "
+        "Sii mirato: se chiedono i referenti, elenca solo i nomi e i contatti senza spiegare come fare domanda. "
+        "Controlla che i punti elenco non siano troncati. "
+        "Concludi con: Fonte: [URL_DA_CITARE].\n\n"
+    )
+    return testo_ritorno + "\n\n".join(docs_validi)
 
 @tool
-def calcola_voto_laurea(media_ponderata: float, bonus_tesi: float = 0.0) -> str:
+def cerca_regolamento_voto_laurea(corso_di_laurea: str) -> str:
     """
-    Calcola il voto di laurea dalla media ponderata degli esami (in trentesimi).
-    Parametri:
-      - media_ponderata: media pesata degli esami (es. 27.5)
-      - bonus_tesi: punti aggiuntivi della tesi, default 0 (max tipico: 7)
+    Cerca il regolamento didattico specifico per calcolare il voto di laurea, 
+    inclusi bonus tesi, punti per carriera e criteri per la lode.
     """
-    base = round((media_ponderata / 30) * 110, 2)
-    finale = min(base + bonus_tesi, 110)
-    lode = " cum laude" if finale >= 110 else ""
-    return (
-        f"Media in 30esimi:       {media_ponderata}\n"
-        f"Conversione in 110esimi: {base:.1f}\n"
-        f"Bonus tesi:             +{bonus_tesi}\n"
-        f"Voto finale:            {finale:.0f}{lode}"
+    query = f"regolamento calcolo voto laurea bonus tesi lode {corso_di_laurea}"
+    
+    # Cerchiamo specificamente tra i PDF dei regolamenti e le pagine didattica
+    risultati = vector_db.similarity_search(query, k=8)
+    
+    docs_validi = []
+    for doc in risultati:
+        source = doc.metadata.get("source", doc.metadata.get("local_file", ""))
+        # Priorità ai PDF di regolamento e sezioni didattica/regolamenti
+        if "regolamenti" in source.lower() or doc.metadata.get("type") == "pdf":
+            docs_validi.append(f"=== FRAMMENTO ===\nURL_DA_CITARE: {source}\nCONTENUTO:\n{doc.page_content}\n=================")
+
+    if not docs_validi:
+        return f"Non ho trovato il regolamento specifico per il calcolo del voto di laurea di: {corso_di_laurea}."
+
+    testo_ritorno = (
+        "DATI REGOLAMENTO LAUREA TROVATI. "
+        "Estrai con precisione la formula di calcolo, i punti bonus previsti per la tesi e eventuali premi carriera. "
+        "CONTROLLO LOGICO: Assicurati di non troncare le formule matematiche. "
+        "Se trovi informazioni contrastanti tra diversi anni accademici, specifica a quale coorte si riferiscono. "
+        "Concludi con: Fonte: [URL_DA_CITARE].\n\n"
     )
+    return testo_ritorno + "\n\n".join(docs_validi[:5])
+
+
+@tool
+def cerca_strutture(nome_struttura: str) -> str:
+    """
+    Cerca la posizione logistica, l'edificio, il piano o la stanza di aule, 
+    laboratori, uffici docenti, biblioteche e segreterie del DIEM.
+    """
+    query_espansa = f"posizione ubicazione stanza edificio piano {nome_struttura}"
+    
+    risultati = vector_db.similarity_search(query_espansa, k=15)  # fetch più ampio per compensare il filtro
+    
+    docs_validi = []
+    for doc in risultati:
+        source = doc.metadata.get("source", doc.metadata.get("local_file", "Fonte sconosciuta"))
+        
+        if "diem.unisa.it" not in source.lower():
+            continue
+            
+        docs_validi.append(f"=== FRAMMENTO ===\nURL_DA_CITARE: {source}\nCONTENUTO:\n{doc.page_content}\n=================")
+
+    if not docs_validi:
+        return f"Non ho trovato informazioni logistiche sulla struttura '{nome_struttura}' nel portale del DIEM."
+
+    testo_ritorno = (
+        "DATI LOGISTICI TROVATI. Leggi i frammenti qui sotto. "
+        "COERENZA ESTREMA: Se l'utente chiede dove si trova un'aula, rispondi SOLO con edificio, piano e stanza. "
+        "Se il frammento contiene indicazioni su come arrivare o orari di apertura della struttura, includili. "
+        "Assicurati che i punti elenco siano frasi di senso compiuto. "
+        "Concludi con: Fonte: [URL_DA_CITARE].\n\n"
+    )
+    return testo_ritorno + "\n\n".join(docs_validi[:6])
 
 TOOLS = [
     cerca_docente,
     cerca_corso,
     cerca_info_diem,
     cerca_internazionale,
-    calcola_voto_laurea,
+    cerca_regolamento_voto_laurea,
+    cerca_strutture,
 ]
 
 SYSTEM_PROMPT = """Sei l'assistente ufficiale del DIEM dell'Università di Salerno.
@@ -289,4 +366,4 @@ chatbot = gr.ChatInterface(
 
 if __name__ == "__main__":
     print("🚀 Avvio chatbot DIEM. Vai sul link locale fornito da Gradio!")
-    chatbot.launch(share=False)
+    chatbot.launch(share=True)
