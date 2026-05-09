@@ -34,7 +34,7 @@ CORSI_DIEM_URLS = [
 ]
 
 def is_relevant(text, url):
-    """Verifica se il testo è pertinente al DIEM e fornisce un feedback visivo."""
+    """Verifica se il testo è pertinente al DIEM."""
     text_upper = text.upper()
     is_valid = any(kw in text_upper for kw in KEYWORDS)
     
@@ -53,7 +53,7 @@ def is_recent_pdf(pdf_url, headers):
     return True
 
 def download_pdf(pdf_url, downloaded_urls, downloaded_hashes):
-    """Scarica i PDF, evita i duplicati tramite Hash ed evita le sovrascritture."""
+    """Scarica i PDF, evita duplicati e sovrascritture."""
     if pdf_url in downloaded_urls:
         return
 
@@ -71,7 +71,6 @@ def download_pdf(pdf_url, downloaded_urls, downloaded_hashes):
                 downloaded_urls.add(pdf_url)
                 return
 
-            # Determinazione del nome file
             filename = None
             cd = res.headers.get('content-disposition')
             if cd and 'filename=' in cd:
@@ -104,12 +103,12 @@ def download_pdf(pdf_url, downloaded_urls, downloaded_hashes):
         pass
 
 def extract_links_and_pdfs(html, current_url, start_url):
-    """Estrae i link validi e individua i PDF, bloccando gli alias nome.cognome."""
+    """Estrae i link bloccando gli alias nome.cognome e gestendo PDF esterni."""
     soup = BeautifulSoup(html, "html.parser")
     links_to_visit = []
     pdfs_to_download = []
     
-    allowed_domain = urlparse(start_url).netloc
+    allowed_domain = urlparse(start_url).netloc  
     
     for a in soup.find_all('a', href=True):
         href = a['href']
@@ -120,23 +119,17 @@ def extract_links_and_pdfs(html, current_url, start_url):
         full_url = urljoin(current_url, href).split('#')[0]
         link_domain = urlparse(full_url).netloc
         
-        # 1. LOGICA PDF (Dominio allargato)
         if full_url.lower().endswith('.pdf') or '/pdf/' in full_url.lower():
             if link_domain == allowed_domain:
                 pdfs_to_download.append(full_url)
                 
-        # 2. LOGICA NAVIGAZIONE HTML
         elif full_url.startswith(start_url):
-            
-            # NUOVO BLOCCO ANTI-DUPLICATI: Scartiamo i link formato "nome.cognome"
             if allowed_domain == "docenti.unisa.it":
                 path_parts = [p for p in urlparse(full_url).path.split('/') if p]
                 if path_parts:
-                    # Il primo segmento dopo l'URL base è il nome o l'ID
                     prof_id_or_name = path_parts[0]
-                    # Se contiene un punto (es. mario.rossi), è il formato duplicato! Saltalo.
                     if '.' in prof_id_or_name:
-                        continue
+                        continue 
             
             if not any(full_url.lower().endswith(ext) for ext in ['.css', '.js', '.png', '.jpg', '.jpeg']):
                 if '/en/' not in full_url and not full_url.endswith('/en'):
@@ -168,9 +161,7 @@ async def crawl_task(task, crawler, downloaded_urls, downloaded_hashes, knowledg
 
             results = await crawler.arun_many(
                 urls=current_queue,
-                config=CrawlerRunConfig(
-                    cache_mode=CacheMode.BYPASS,
-                ),
+                config=CrawlerRunConfig(cache_mode=CacheMode.BYPASS),
                 max_concurrent=10
             )
 
@@ -181,12 +172,31 @@ async def crawl_task(task, crawler, downloaded_urls, downloaded_hashes, knowledg
                     print(f"  [!] Errore su {result.url}: {result.error_message}")
                     continue
 
-                # 1. VALUTAZIONE FILTRO
+                # --- VALUTAZIONE FILTRO BASATA SULLA PROFONDITÀ ---
                 page_is_relevant = True
+                should_explore = True
+                
                 if use_filter:
-                    page_is_relevant = is_relevant(result.markdown, result.url)
+                    if depth == 0:
+                        # Root: Testiamo per vedere se c'è testo rilevante, ma esploriamo a prescindere.
+                        page_is_relevant = is_relevant(result.markdown, result.url)
+                        should_explore = True 
+                        
+                    elif depth == 1:
+                        # Depth 1: Il VERO POSTO DI BLOCCO
+                        page_is_relevant = is_relevant(result.markdown, result.url)
+                        if not page_is_relevant:
+                            should_explore = False # PRUNING! Tagliamo il ramo
+                            print(f"    ↳ Ramo potato: Il filtro ha bloccato {result.url}")
+                            
+                    else:
+                        # Depth > 1: Disattiviamo il filtro. Se siamo qui, il Depth 1 era valido.
+                        page_is_relevant = True
+                        should_explore = True
+                        print(f"  [FILTRO] BYPASS (Depth {depth} interno): {result.url}")
+                # ----------------------------------------------------
 
-                # 2. SALVATAGGIO (Solo se rilevante o se filtro disattivato)
+                # SALVATAGGIO
                 if page_is_relevant:
                     doc = Document(page_content=result.markdown, metadata={"source": result.url})
                     knowledge_base.append(doc)
@@ -201,20 +211,8 @@ async def crawl_task(task, crawler, downloaded_urls, downloaded_hashes, knowledg
 
                     with open(nome_file, "w", encoding="utf-8") as f:
                         f.write(f"SOURCE: {result.url}\n{'='*50}\n\n{result.markdown}")
-                    # Rimosso print del salvataggio MD per pulire il terminale (visto che abbiamo il log del filtro)
 
-                # 3. TAGLIO DEI RAMI (PRUNING LOGIC)
-                should_explore = True
-                
-                # Se la pagina è stata SCARTATA dal filtro...
-                if use_filter and not page_is_relevant:
-                    # Controlliamo se è la Root (da cui invece dobbiamo sempre diramarci)
-                    is_root = result.url.rstrip('/') == start_url.rstrip('/')
-                    if not is_root:
-                        should_explore = False # STOP! Nessun link verrà estratto da questa pagina.
-                        print(f"    ↳ ✂️ Ramo potato: Nessuna esplorazione da questo URL.")
-
-                # 4. ESTRAZIONE LINK
+                # ESTRAZIONE LINK
                 if depth < max_depth and should_explore:
                     new_links, pdfs = extract_links_and_pdfs(result.html, result.url, start_url)
 
@@ -245,7 +243,6 @@ async def main():
         for task in SEARCH_TASKS:
             await crawl_task(task, crawler, downloaded_urls, downloaded_hashes, knowledge_base)
 
-    # Caricamento PDF e salvataggio finale
     print(f"\nParsing dei {len(downloaded_hashes)} PDF unici...")
     logging.getLogger("pypdf").setLevel(logging.ERROR) 
     
