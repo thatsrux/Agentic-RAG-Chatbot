@@ -6,61 +6,75 @@ import logging
 import re
 import hashlib
 import json
+import io
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
+
+# Parsing PDF al volo
+from pypdf import PdfReader
 
 # Importiamo Crawl4AI e i Documenti di LangChain
 from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
 from langchain_core.documents import Document
-from langchain_community.document_loaders import PyPDFDirectoryLoader
+
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 # --- CONFIGURAZIONE ---
 DATA_PATH = r"data"
-PDF_DIR = os.path.join(DATA_PATH, "PDFs")
-PAGES_DIR = os.path.join(DATA_PATH, "pages")
+PAGES_DIR = os.path.join(DATA_PATH, "pages")     # Per il markdown delle pagine web
+PDF_MD_DIR = os.path.join(DATA_PATH, "pdf_md")   # Per il markdown estratto dai PDF
 STATE_FILE = "crawler_state.json"
 KB_FILE = "knowledge_base.pkl"
 
-os.makedirs(PDF_DIR, exist_ok=True)
 os.makedirs(PAGES_DIR, exist_ok=True)
+os.makedirs(PDF_MD_DIR, exist_ok=True)
 
 KEYWORDS = ["DIEM", "DIPARTIMENTO DI INGEGNERIA DELL'INFORMAZIONE", "INGEGNERIA INFORMATICA"]
-# Link specifici dei corsi DIEM
 CORSI_DIEM_URLS = [
     "https://corsi.unisa.it/ingegneria-dell-informazione-per-la-medicina-digitale",
     "https://corsi.unisa.it/ingegneria-informatica",
-    #"https://corsi.unisa.it/electrical-engineering-for-digital-energy",
-    #"https://corsi.unisa.it/information-Engineering-for-digital-medicine",
-    #"https://corsi.unisa.it/ingegneria-informatica-magistrale",
-    #"https://corsi.unisa.it/ingegneria-dell-informazione",
-    #"https://corsi.unisa.it/photovoltaics"
+    "https://corsi.unisa.it/electrical-engineering-for-digital-energy",
+    "https://corsi.unisa.it/information-Engineering-for-digital-medicine",
+    "https://corsi.unisa.it/ingegneria-informatica-magistrale",
+    "https://corsi.unisa.it/ingegneria-dell-informazione",
+    "https://corsi.unisa.it/photovoltaics"
 ]
 
 # --- GESTIONE DELLO STATO (INCREMENTAL SCRAPING) ---
 
 def load_state():
-    """Carica la memoria delle run precedenti."""
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    # Struttura iniziale se è la prima run
     return {"web": {}, "pdfs": {}}
 
 def save_state(state):
-    """Salva lo stato aggiornato su disco."""
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=4)
 
 def load_knowledge_base():
-    """Carica la KB esistente e la converte in un dizionario per facili aggiornamenti."""
+    """Carica la KB esistente (ora contiene sia web che PDF testuali)."""
     if os.path.exists(KB_FILE):
         with open(KB_FILE, "rb") as f:
             docs = pickle.load(f)
-            # Mappiamo URL -> Documento (Escludiamo i PDF perché li ricarichiamo sempre freschi dalla cartella)
-            return {doc.metadata.get("source"): doc for doc in docs if not doc.metadata.get("source", "").endswith(".pdf")}
+            return {doc.metadata.get("source"): doc for doc in docs}
     return {}
 
 # --- FUNZIONI DI SUPPORTO ---
+
+def clean_md(md_content):
+    """Pulisce il markdown rimuovendo menu laterali, intestazioni e footer."""
+    if not md_content:
+        return ""
+        
+    clean_text = md_content.strip()
+    
+    clean_text = re.sub(r'\[skip to main content\].*?Condividi\s*(?:\d+\.\s*\[\]\(.*?\)\s*)*', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
+    clean_text = re.sub(r'\* \[Home \]\(.*?\).*?\[Contatti \]\(.*?\)', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
+    clean_text = re.sub(r'\* \[Presentazione \]\(.*?\).*?\[Strutture \]\(.*?\)', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
+    clean_text = re.sub(r'\[Vai al Contenuto della Pagina\].*', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
+    
+    return clean_text.strip()
 
 def is_relevant(text, url):
     text_upper = text.upper()
@@ -77,63 +91,64 @@ def is_recent_pdf(pdf_url, headers):
         return any(int(y) >= 2020 for y in year_matches)
     return True
 
-def download_pdf(pdf_url, state):
-    """Scarica i PDF evitando duplicati sia per URL che per Contenuto (Hash)."""
-    # 1. Controllo veloce: abbiamo già processato questo ESATTO URL?
+def download_and_parse_pdf(pdf_url, state, doc_dict):
+    """Scarica il PDF, calcola l'hash, estrae il testo in RAM e salva un file .md."""
     if pdf_url in state["pdfs"]:
         return
 
     try:
         res = requests.get(pdf_url, timeout=10)
         if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', '').lower():
+            
+            # 1. Filtro Anno
             if not is_recent_pdf(pdf_url, res.headers):
                 return
 
+            # 2. Check Hash del binario
             file_hash = hashlib.md5(res.content).hexdigest()
-            
-            # --- NUOVO FIX: Controllo se l'hash esiste già sotto QUALSIASI altro URL ---
-            existing_hashes = [info["hash"] for info in state["pdfs"].values()]
-            if file_hash in existing_hashes:
-                state["pdfs"][pdf_url] = {"hash": file_hash, "filename": "DUPLICATO_CONTENUTO"}
-                print(f"  [DEDUPLICAZIONE] Contenuto già presente (da altro link), salto: {pdf_url}")
+            old_info = state["pdfs"].get(pdf_url)
+
+            if old_info and old_info["hash"] == file_hash:
                 return
-            # -----------------------------------------------------------------------
 
-            # --- RECUPERO DEL NOME FILE ---
-            filename = None
-            cd = res.headers.get('content-disposition')
-            if cd and 'filename=' in cd:
-                fnames = re.findall('filename=["\']?([^"\';]+)["\']?', cd)
-                if fnames:
-                    filename = fnames[0]
-            
-            if not filename:
-                base_name = os.path.basename(pdf_url).split("?")[0]
-                if not base_name or base_name.lower() == 'pdf' or base_name.isnumeric():
-                    base_name = f"doc_{file_hash[:6]}"
-                filename = base_name if base_name.lower().endswith('.pdf') else f"{base_name}.pdf"
+            existing_hashes = [info["hash"] for info in state["pdfs"].values() if info.get("hash")]
+            if file_hash in existing_hashes and not old_info:
+                state["pdfs"][pdf_url] = {"hash": file_hash, "filename": "DUPLICATO_CONTENUTO"}
+                print(f"  [DEDUPLICAZIONE] Contenuto PDF già presente, salto: {pdf_url}")
+                return
 
-            filepath = os.path.join(PDF_DIR, filename)
-            name_part, ext_part = os.path.splitext(filename)
-            counter = 1
-            
-            # Anti-sovrascrittura per nomi uguali ma contenuti diversi
-            while os.path.exists(filepath):
-                filename = f"{name_part}_{counter}{ext_part}"
-                filepath = os.path.join(PDF_DIR, filename)
-                counter += 1
-            # ------------------------------
+            if old_info and old_info["hash"] != file_hash and old_info.get("filename"):
+                old_filepath = os.path.join(PDF_MD_DIR, old_info["filename"])
+                if os.path.exists(old_filepath) and old_info["filename"] != "DUPLICATO_CONTENUTO":
+                    os.remove(old_filepath)
+                    print(f"  [UPDATE] Vecchio Markdown PDF eliminato.")
 
-            # Salvataggio fisico
-            with open(filepath, "wb") as f:
-                f.write(res.content)
+            # --- 3. PARSING IN RAM ---
+            if not res.content.startswith(b'%PDF'):
+                print(f"  [!] Falso PDF ignorato: {pdf_url}")
+                return
+                
+            reader = PdfReader(io.BytesIO(res.content))
+            extracted_text = "\n\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
             
-            # Aggiornamento stato
-            state["pdfs"][pdf_url] = {"hash": file_hash, "filename": filename}
-            print(f"  [PDF] Nuovo file unico scaricato: {filename}")
-            
+            if len(extracted_text.strip()) > 50:
+                filename = f"pdf_{file_hash[:10]}.md"
+                filepath = os.path.join(PDF_MD_DIR, filename)
+                
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(f"SOURCE: {pdf_url}\nTYPE: PDF\n{'='*50}\n\n")
+                    f.write(extracted_text)
+                
+                doc = Document(page_content=extracted_text, metadata={"source": pdf_url, "type": "pdf"})
+                doc_dict[pdf_url] = doc
+                
+                state["pdfs"][pdf_url] = {"hash": file_hash, "filename": filename}
+                print(f"  [PDF->MD] {'AGGIORNATO' if old_info else 'NUOVO PARSING'}: {filename}")
+            else:
+                print(f"  [PDF] Testo illeggibile o documento scansionato, ignorato: {pdf_url}")
+                
     except Exception as e:
-        print(f"  [!] Errore download PDF: {e}")
+        print(f"  [!] Errore parsing PDF: {e}")
 
 def extract_links_and_pdfs(html, current_url, start_url):
     soup = BeautifulSoup(html, "html.parser")
@@ -217,52 +232,54 @@ async def crawl_task(task, crawler, state, doc_dict):
                 if not result.success:
                     continue
 
-                # --- CONTROLLO HASH (MODIFICA PAGINA) ---
-                page_hash = hashlib.md5(result.markdown.encode('utf-8')).hexdigest()
-                old_hash = state["web"].get(result.url)
+                # --- 1. PULIZIA DEL MARKDOWN ---
+                cleaned_markdown = clean_md(result.markdown)
                 
+                # Usiamo il testo pulito per tutti i calcoli successivi
+                page_hash = hashlib.md5(cleaned_markdown.encode('utf-8')).hexdigest()
+                old_hash = state["web"].get(result.url)
                 content_changed = (old_hash != page_hash)
                 
-                # --- VALUTAZIONE FILTRO ---
+                # --- 2. VALUTAZIONE FILTRO ---
                 page_is_relevant = True
                 should_explore = True
                 
                 if use_filter:
                     if depth == 0:
-                        page_is_relevant = is_relevant(result.markdown, result.url)
+                        page_is_relevant = is_relevant(cleaned_markdown, result.url)
                     elif depth == 1:
-                        page_is_relevant = is_relevant(result.markdown, result.url)
+                        page_is_relevant = is_relevant(cleaned_markdown, result.url)
                         if not page_is_relevant:
                             should_explore = False 
                     else:
                         page_is_relevant = True
 
-                # --- AGGIORNAMENTO DATI (Solo se rilevante E se il contenuto è cambiato) ---
+                # --- 3. SALVATAGGIO ---
                 if page_is_relevant:
                     if not content_changed:
                         print(f"  [CACHE] Invariato, salto salvataggio: {result.url}")
                     else:
-                        # 1. Aggiorna la Base di Conoscenza
-                        doc = Document(page_content=result.markdown, metadata={"source": result.url})
-                        doc_dict[result.url] = doc
-                        
-                        # 2. Salva il file Markdown (Nome basato sull'Hash dell'URL, stabile!)
-                        url_hash_name = hashlib.md5(result.url.encode()).hexdigest()[:10]
-                        nome_file = os.path.join(PAGES_DIR, f"page_{url_hash_name}.md")
-                        
-                        with open(nome_file, "w", encoding="utf-8") as f:
-                            f.write(f"SOURCE: {result.url}\n{'='*50}\n\n{result.markdown}")
-                        
-                        # 3. Aggiorna lo stato
-                        state["web"][result.url] = page_hash
-                        print(f"  [MD] {'AGGIORNATO' if old_hash else 'NUOVO'}: {result.url}")
+                        if len(cleaned_markdown) > 10:
+                            doc = Document(page_content=cleaned_markdown, metadata={"source": result.url, "type": "web"})
+                            doc_dict[result.url] = doc
+                            
+                            url_hash_name = hashlib.md5(result.url.encode()).hexdigest()[:10]
+                            nome_file = os.path.join(PAGES_DIR, f"page_{url_hash_name}.md")
+                            
+                            with open(nome_file, "w", encoding="utf-8") as f:
+                                f.write(f"SOURCE: {result.url}\nTYPE: WEBPAGE\n{'='*50}\n\n{cleaned_markdown}")
+                            
+                            state["web"][result.url] = page_hash
+                            print(f"  [MD] {'AGGIORNATO' if old_hash else 'NUOVO'}: {result.url}")
+                        else:
+                            print(f"  [SKIPPED] Testo troppo corto dopo la pulizia: {result.url}")
 
-                # --- ESTRAZIONE LINK (Deve essere fatta sempre per poter navigare) ---
+                # --- 4. ESTRAZIONE LINK ---
                 if depth < max_depth and should_explore:
                     new_links, pdfs = extract_links_and_pdfs(result.html, result.url, start_url)
 
                     for pdf_url in pdfs:
-                        download_pdf(pdf_url, state)
+                        download_and_parse_pdf(pdf_url, state, doc_dict)
 
                     for link in new_links:
                         if link not in visited:
@@ -272,47 +289,37 @@ async def crawl_task(task, crawler, state, doc_dict):
             current_queue = next_queue
 
 async def main():
-    # 1. Carica la memoria precedente
     state = load_state()
     doc_dict = load_knowledge_base()
 
     SEARCH_TASKS = [
-        #{"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 3, "filter": False},
+        {"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 3, "filter": False},
         {"name": "Docenti", "urls": ["https://docenti.unisa.it/"], "depth": 2, "filter": True},
-        #{"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 3, "filter": False}
+        {"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 3, "filter": False}
     ]
 
-    # 2. Esegui lo scraping (che aggiornerà 'state' e 'doc_dict')
     async with AsyncWebCrawler(verbose=False) as crawler:
         for task in SEARCH_TASKS:
             await crawl_task(task, crawler, state, doc_dict)
 
-    # 3. Gestione PDF finali
-    print(f"\nCompilazione Knowledge Base finale...")
-    logging.getLogger("pypdf").setLevel(logging.ERROR) 
+    print(f"\nCompilazione Knowledge Base finale in corso...")
     
     knowledge_base = list(doc_dict.values())
     
-    pdf_loader = PyPDFDirectoryLoader(PDF_DIR)
-    pdf_docs = pdf_loader.load()
-    knowledge_base.extend(pdf_docs) 
-
-    # 4. Salva tutto su disco
     with open(KB_FILE, "wb") as f:
         pickle.dump(knowledge_base, f)
         
     save_state(state)
 
-    # --- IL NUOVO CONTO FINALE ---
-    pdf_files_count = len([f for f in os.listdir(PDF_DIR) if f.lower().endswith('.pdf')])
+    pdf_files_count = len(state["pdfs"])
+    web_files_count = len(state["web"])
 
     print(f"\n{'='*12} RESOCONTO FINALE {'='*12}")
-    print(f"🌍 Pagine Web uniche (Markdown): {len(doc_dict)}")
-    print(f"📁 Documenti PDF unici scaricati: {pdf_files_count}")
-    print(f"📑 Pagine testuali lette dentro i PDF: {len(pdf_docs)}")
-    print(f"🧠 Totale 'Documenti' in Knowledge Base: {len(knowledge_base)}")
+    print(f"🌍 Pagine Web uniche tracciate: {web_files_count}")
+    print(f"📁 Documenti PDF unici tracciati (convertiti): {pdf_files_count}")
+    print(f"🧠 Totale 'Documenti' salvati nella Knowledge Base: {len(knowledge_base)}")
     print(f"{'='*40}")
-    print("Stato incrementale salvato. Al prossimo avvio scaricherò solo le novità!")
+    print("Stato incrementale salvato. Al prossimo avvio verificherò solo le variazioni!")
 
 if __name__ == "__main__":
     asyncio.run(main())
