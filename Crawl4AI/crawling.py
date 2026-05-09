@@ -21,8 +21,8 @@ logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 # --- CONFIGURAZIONE ---
 DATA_PATH = r"data"
-PAGES_DIR = os.path.join(DATA_PATH, "pages")     # Per il markdown delle pagine web
-PDF_MD_DIR = os.path.join(DATA_PATH, "pdf_md")   # Per il markdown estratto dai PDF
+PAGES_DIR = os.path.join(DATA_PATH, "pages")     
+PDF_MD_DIR = os.path.join(DATA_PATH, "pdf_md")   
 STATE_FILE = "crawler_state.json"
 KB_FILE = "knowledge_base.pkl"
 
@@ -53,7 +53,6 @@ def save_state(state):
         json.dump(state, f, indent=4)
 
 def load_knowledge_base():
-    """Carica la KB esistente (ora contiene sia web che PDF testuali)."""
     if os.path.exists(KB_FILE):
         with open(KB_FILE, "rb") as f:
             docs = pickle.load(f)
@@ -62,18 +61,27 @@ def load_knowledge_base():
 
 # --- FUNZIONI DI SUPPORTO ---
 
+def generate_safe_filename(url):
+    """Genera un nome file leggibile e sicuro per il SO, identico a crawling.py"""
+    clean_url = url.replace("https://", "").replace("http://", "")
+    safe_name = re.sub(r'[\/\\?%*:|"<>&=]+', '_', clean_url)
+    safe_name = safe_name.strip('_')
+    
+    if len(safe_name) > 200:
+        url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()[:8]
+        safe_name = safe_name[:190] + "_" + url_hash
+        
+    return f"{safe_name}.md"
+
 def clean_md(md_content):
     """Pulisce il markdown rimuovendo menu laterali, intestazioni e footer."""
     if not md_content:
         return ""
-        
     clean_text = md_content.strip()
-    
     clean_text = re.sub(r'\[skip to main content\].*?Condividi\s*(?:\d+\.\s*\[\]\(.*?\)\s*)*', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
     clean_text = re.sub(r'\* \[Home \]\(.*?\).*?\[Contatti \]\(.*?\)', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
     clean_text = re.sub(r'\* \[Presentazione \]\(.*?\).*?\[Strutture \]\(.*?\)', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
     clean_text = re.sub(r'\[Vai al Contenuto della Pagina\].*', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
-    
     return clean_text.strip()
 
 def is_relevant(text, url):
@@ -92,7 +100,6 @@ def is_recent_pdf(pdf_url, headers):
     return True
 
 def download_and_parse_pdf(pdf_url, state, doc_dict):
-    """Scarica il PDF, calcola l'hash, estrae il testo in RAM e salva un file .md."""
     if pdf_url in state["pdfs"]:
         return
 
@@ -100,11 +107,9 @@ def download_and_parse_pdf(pdf_url, state, doc_dict):
         res = requests.get(pdf_url, timeout=10)
         if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', '').lower():
             
-            # 1. Filtro Anno
             if not is_recent_pdf(pdf_url, res.headers):
                 return
 
-            # 2. Check Hash del binario
             file_hash = hashlib.md5(res.content).hexdigest()
             old_info = state["pdfs"].get(pdf_url)
 
@@ -117,26 +122,19 @@ def download_and_parse_pdf(pdf_url, state, doc_dict):
                 print(f"  [DEDUPLICAZIONE] Contenuto PDF già presente, salto: {pdf_url}")
                 return
 
-            if old_info and old_info["hash"] != file_hash and old_info.get("filename"):
-                old_filepath = os.path.join(PDF_MD_DIR, old_info["filename"])
-                if os.path.exists(old_filepath) and old_info["filename"] != "DUPLICATO_CONTENUTO":
-                    os.remove(old_filepath)
-                    print(f"  [UPDATE] Vecchio Markdown PDF eliminato.")
-
-            # --- 3. PARSING IN RAM ---
             if not res.content.startswith(b'%PDF'):
-                print(f"  [!] Falso PDF ignorato: {pdf_url}")
                 return
                 
             reader = PdfReader(io.BytesIO(res.content))
             extracted_text = "\n\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
             
             if len(extracted_text.strip()) > 50:
-                filename = f"pdf_{file_hash[:10]}.md"
+                filename = generate_safe_filename(pdf_url)
                 filepath = os.path.join(PDF_MD_DIR, filename)
                 
+                # --- RIPRISTINO YAML FRONTMATTER ---
                 with open(filepath, "w", encoding="utf-8") as f:
-                    f.write(f"SOURCE: {pdf_url}\nTYPE: PDF\n{'='*50}\n\n")
+                    f.write(f"---\nsource: {pdf_url}\ntype: pdf\n---\n\n")
                     f.write(extracted_text)
                 
                 doc = Document(page_content=extracted_text, metadata={"source": pdf_url, "type": "pdf"})
@@ -144,8 +142,6 @@ def download_and_parse_pdf(pdf_url, state, doc_dict):
                 
                 state["pdfs"][pdf_url] = {"hash": file_hash, "filename": filename}
                 print(f"  [PDF->MD] {'AGGIORNATO' if old_info else 'NUOVO PARSING'}: {filename}")
-            else:
-                print(f"  [PDF] Testo illeggibile o documento scansionato, ignorato: {pdf_url}")
                 
     except Exception as e:
         print(f"  [!] Errore parsing PDF: {e}")
@@ -232,15 +228,11 @@ async def crawl_task(task, crawler, state, doc_dict):
                 if not result.success:
                     continue
 
-                # --- 1. PULIZIA DEL MARKDOWN ---
                 cleaned_markdown = clean_md(result.markdown)
-                
-                # Usiamo il testo pulito per tutti i calcoli successivi
                 page_hash = hashlib.md5(cleaned_markdown.encode('utf-8')).hexdigest()
                 old_hash = state["web"].get(result.url)
                 content_changed = (old_hash != page_hash)
                 
-                # --- 2. VALUTAZIONE FILTRO ---
                 page_is_relevant = True
                 should_explore = True
                 
@@ -254,7 +246,6 @@ async def crawl_task(task, crawler, state, doc_dict):
                     else:
                         page_is_relevant = True
 
-                # --- 3. SALVATAGGIO ---
                 if page_is_relevant:
                     if not content_changed:
                         print(f"  [CACHE] Invariato, salto salvataggio: {result.url}")
@@ -263,18 +254,19 @@ async def crawl_task(task, crawler, state, doc_dict):
                             doc = Document(page_content=cleaned_markdown, metadata={"source": result.url, "type": "web"})
                             doc_dict[result.url] = doc
                             
-                            url_hash_name = hashlib.md5(result.url.encode()).hexdigest()[:10]
-                            nome_file = os.path.join(PAGES_DIR, f"page_{url_hash_name}.md")
+                            filename = generate_safe_filename(result.url)
+                            nome_file = os.path.join(PAGES_DIR, filename)
                             
+                            # --- RIPRISTINO YAML FRONTMATTER ---
                             with open(nome_file, "w", encoding="utf-8") as f:
-                                f.write(f"SOURCE: {result.url}\nTYPE: WEBPAGE\n{'='*50}\n\n{cleaned_markdown}")
+                                f.write(f"---\nsource: {result.url}\ntype: webpage\n---\n\n")
+                                f.write(cleaned_markdown)
                             
                             state["web"][result.url] = page_hash
-                            print(f"  [MD] {'AGGIORNATO' if old_hash else 'NUOVO'}: {result.url}")
+                            print(f"  [MD] {'AGGIORNATO' if old_hash else 'NUOVO'}: {filename}")
                         else:
                             print(f"  [SKIPPED] Testo troppo corto dopo la pulizia: {result.url}")
 
-                # --- 4. ESTRAZIONE LINK ---
                 if depth < max_depth and should_explore:
                     new_links, pdfs = extract_links_and_pdfs(result.html, result.url, start_url)
 
@@ -293,8 +285,8 @@ async def main():
     doc_dict = load_knowledge_base()
 
     SEARCH_TASKS = [
-        {"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 3, "filter": False},
-        {"name": "Docenti", "urls": ["https://docenti.unisa.it/"], "depth": 2, "filter": True},
+        #{"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 3, "filter": False},
+        #{"name": "Docenti", "urls": ["https://docenti.unisa.it/"], "depth": 2, "filter": True},
         {"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 3, "filter": False}
     ]
 
