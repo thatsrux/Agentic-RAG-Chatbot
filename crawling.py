@@ -51,6 +51,19 @@ def generate_safe_filename(url, is_pdf):
     
     return f"{safe_name}{ext}"
 
+def clean_md(md_content):
+    """Pulisce il markdown rimuovendo menu laterali, intestazioni e footer."""
+    clean_text = md_content.strip()
+    
+    clean_text = re.sub(r'\[skip to main content\].*?Condividi\s*(?:\d+\.\s*\[\]\(.*?\)\s*)*', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
+    
+    clean_text = re.sub(r'\* \[Home \]\(.*?\).*?\[Contatti \]\(.*?\)', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
+    clean_text = re.sub(r'\* \[Presentazione \]\(.*?\).*?\[Strutture \]\(.*?\)', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
+    
+    clean_text = re.sub(r'\[Vai al Contenuto della Pagina\].*', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
+    
+    return clean_text.strip()
+
 async def process_pdf(url, session, global_visited, source_page, depth, max_depth):
     """Scarica ed estrae il testo da un PDF in modo asincrono."""
     if url in global_visited:
@@ -88,9 +101,12 @@ async def process_site(crawler, session, site, global_visited):
     base_domain = get_domain(base_url)
     
     current_level_urls = [base_url]
+    valid_professors = set()
     
     js_cleanup = """
     const selectors = [
+        '#off-rubrica', '#off-search', '#off-language', '#off-servizi-on-line', '#off-profili',
+        '#menu-bar', '#box-agenda',
         '.homeBox', '#logo-footer',
         '.modal', '#blueimp-gallery', '.blueimp-gallery', '.blueimp-gallery-controls',
         '.carousel-control', '.carousel-indicators', '.control-box', '#go_down', '#pause', '#resize',
@@ -132,27 +148,41 @@ async def process_site(crawler, session, site, global_visited):
                 continue
 
             if "docenti.unisa.it" in result.url and result.url.rstrip("/") != "https://docenti.unisa.it":
-                html_lower = (result.html or "").lower()
-                
-                is_diem = "diem" in html_lower or "informazione ed elettrica" in html_lower
-                
-                if not is_diem:
-                    print(f"   ➔ [{depth}/{max_depth}] [SKIPPED] Docente di un altro dipartimento: {result.url}")
-                    continue
+                # Estraiamo l'ID del professore dall'URL (es. '005501')
+                prof_match = re.search(r'docenti\.unisa\.it/([^/]+)', result.url)
+                if prof_match:
+                    prof_id = prof_match.group(1)
+                    
+                    # Se siamo sulla homepage del docente, valutiamo a quale dipartimento appartiene
+                    if result.url.endswith(f"/{prof_id}") or result.url.endswith(f"/{prof_id}/") or "/home" in result.url:
+                        html_lower = (result.html or "").lower()
+                        is_diem = "diem" in html_lower or "informazione ed elettrica" in html_lower
+                        
+                        if is_diem:
+                            valid_professors.add(prof_id) # Promosso! È del DIEM
+                        else:
+                            print(f"   ➔ [{depth}/{max_depth}] [SKIPPED] Docente non DIEM: {result.url}")
+                            continue
+                    else:
+                        # Se è una sottopagina (come /pubblicazioni o /didattica)
+                        # passa SOLO se il professore è già stato promosso sulla home
+                        if prof_id not in valid_professors:
+                            continue
             
             md_content = result.markdown
             
             if md_content:
-                clean_md = md_content.strip()
-                if len(clean_md) > 10:
+                cleaned_text = clean_md(md_content)
+
+                if len(cleaned_text) > 10:
                     filename = generate_safe_filename(result.url, is_pdf=False)
                     save_path = os.path.join(PAGES_DIR, filename)
                     
                     with open(save_path, "w", encoding="utf-8") as f:
                         f.write(f"---\nsource: {result.url}\ntype: webpage\n---\n\n")
-                        f.write(clean_md)
+                        f.write(cleaned_text)
                 else:
-                    print(f"   ➔ [{depth}/{max_depth}] [SKIPPED] Testo troppo corto ({len(clean_md)} char): {result.url}")
+                    print(f"   ➔ [{depth}/{max_depth}] [SKIPPED] Testo troppo corto ({len(cleaned_text)} char): {result.url}")
             else:
                 print(f"   ➔ [{depth}/{max_depth}] [SKIPPED] Markdown vuoto: {result.url}")
                 
@@ -190,7 +220,6 @@ async def main():
     
     global_visited = set()
     
-    # Inizializza sessione HTTP per i PDF e il Crawler per le pagine
     async with aiohttp.ClientSession() as session:
         async with AsyncWebCrawler(config=browser_config) as crawler:
             for site in TARGET_SITES:
