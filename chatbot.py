@@ -74,7 +74,7 @@ def search_vector(query: str, source_filter: str = None, k: int = 5) -> str:
 def cerca_docente(nome_docente: str) -> str:
     """
     Cerca informazioni su un docente del DIEM: contatti, email,
-    orari di ricevimento, ruolo, settore scientifico-disciplinare.
+    orari di ricevimento, ruolo, settore scientifico-disciplinare e curriculum.
     Accetta il nome e cognome o solo il cognome.
     """
     parti_nome_lower = [p.lower() for p in nome_docente.strip().split()]
@@ -129,21 +129,25 @@ def cerca_docente(nome_docente: str) -> str:
         docs_univoci = list(dict.fromkeys(docs_validi))
         
         homepage_docs = []
+        curriculum_docs = []
         altri_docs = []
+        
         for doc in docs_univoci:
-            if re.search(r'docenti\.unisa\.it/\d+(?:/home)?\)', doc.lower()):
+            url_match = re.search(r'URL_DA_CITARE:\s*(https?://[^\s]+)', doc)
+            url = url_match.group(1).lower() if url_match else ""
+            
+            if "/curriculum" in url:
+                curriculum_docs.append(doc)
+            elif re.search(r'docenti\.unisa\.it/\d+(?:/home|/)?$', url):
                 homepage_docs.append(doc)
             else:
                 altri_docs.append(doc)
                 
-        docs_finali = homepage_docs + altri_docs
+        docs_finali = curriculum_docs + homepage_docs + altri_docs
         
-        testo_ritorno = (
-            "DATI TROVATI. Leggi i frammenti qui sotto. "
-            "Se l'utente chiede una info specifica (es. curriculum), estrai i dati SOLO dal frammento con l'URL corrispondente. "
-            "DEVI concludere la risposta inserendo l'URL_DA_CITARE esatto.\n\n"
-        )
-        return testo_ritorno + "\n\n".join(docs_finali[:8])
+        # Elimina testo_ritorno e reminder_finale attuali. Sostituisci il return con:
+        istruzione = "Usa questi frammenti ufficiali per rispondere alla domanda. Non inventare nulla e cita l'URL_DA_CITARE.\n\n"
+        return istruzione + "\n\n".join(docs_finali[:8])
         
     else:
         return f"ERRORE ASSOLUTO: Non esiste una pagina ufficiale per '{nome_docente}'. NON INVENTARE NULLA. NON INVENTARE LINK FALSI. Rispondi all'utente dicendo che non hai trovato il suo profilo nel database docenti."
@@ -167,41 +171,70 @@ def cerca_corso(query: str) -> str:
     if not docs_validi:
         return f"Nessuna informazione ufficiale trovata per la query: {query}"
 
-    testo_ritorno = (
-        "DATI TROVATI SUI CORSI. Leggi i frammenti qui sotto. "
-        "Se l'utente chiede dei requisiti di ammissione, usa i frammenti con '/iscriversi' o '/ammissione'. "
-        "Se chiede del piano di studio, usa i frammenti con '/didattica'. "
-        "REGOLA VITALE: Rispondi in modo ESTREMAMENTE MIRATO. Non aggiungere info su tasse o date se l'utente ha chiesto solo il syllabus. "
-        "Assicurati che ogni punto dell'elenco sia una frase compiuta. "
-        "Concludi con: Fonte: [URL_DA_CITARE].\n\n"
-    )
-    return testo_ritorno + "\n\n".join(docs_validi[:6])
+    # Sostituisci il testo_ritorno e il return con:
+    istruzione = "Usa questi frammenti ufficiali per rispondere alla domanda sui corsi. Non inventare nulla e cita l'URL_DA_CITARE.\n\n"
+    return istruzione + "\n\n".join(docs_validi[:6])
 
 @tool
 def cerca_info_diem(query: str) -> str:
     """
-    Cerca informazioni generali sul DIEM: membri di commissioni, sede, laboratori, 
-    aree di ricerca, strutture, eventi e documenti ufficiali.
+    Cerca informazioni istituzionali sul DIEM: membri di commissioni, 
+    aree di ricerca, organi collegiali, eventi, bandi e documenti ufficiali.
+    NON USARE questo tool per cercare aule, laboratori o posizioni logistiche.
     """
-    vec_docs_web = vector_db.similarity_search(query, k=5, filter={"type": "webpage"})
-    vec_docs_pdf = vector_db.similarity_search(query, k=3, filter={"type": "pdf"})
+    # Usiamo k alti per superare i menu, ma poi filtreremo drasticamente!
+    vec_docs_web = vector_db.similarity_search(query, k=20, filter={"type": "webpage"})
+    vec_docs_pdf = vector_db.similarity_search(query, k=5, filter={"type": "pdf"})
     
     docs_validi = []
+    contenuti_visti = set()
+    
+    # 1. Recupero, filtraggio e deduplicazione
     for doc in vec_docs_web + vec_docs_pdf:
         source = doc.metadata.get("source", "Fonte sconosciuta")
+        contenuto = doc.page_content.strip()
+        
         if "diem.unisa.it" in source.lower() or doc.metadata.get("type") == "pdf":
-            docs_validi.append(f"=== FRAMMENTO ===\nURL_DA_CITARE: {source}\nCONTENUTO:\n{doc.page_content}\n=================")
+            if contenuto in contenuti_visti:
+                continue
+            contenuti_visti.add(contenuto)
+            
+            # Usiamo un DIZIONARIO per poter elaborare facilmente i dati dopo
+            docs_validi.append({
+                "url": source,
+                "text": contenuto
+            })
 
     if not docs_validi:
-        return "Nessuna informazione istituzionale trovata sul DIEM per questa richiesta."
+        return "Nessuna informazione istituzionale trovata sul DIEM."
 
-    testo_ritorno = (
-        "DATI DI DIPARTIMENTO TROVATI. "
-        "ATTENZIONE TABELLE: Se i dati sono in una tabella (es. membri commissione), leggi riga per riga e riporta i nomi esatti. "
-        "COERENZA ESTREMA: Se l'utente chiede i membri, elenca Nomi, Cognomi e Ruoli. Non inventare nomi generici. "
-        "Concludi con: Fonte: [URL_DA_CITARE].\n\n"
-    )
-    return testo_ritorno + "\n\n".join(docs_validi[:6])
+    # 2. LOGICA DI CLASSIFICAZIONE (Ranking Intelligente)
+    pagine_prioritarie = []
+    altre_pagine = []
+    
+    for item in docs_validi:
+        txt = item["text"].lower()
+        url = item["url"].lower()
+        
+        # VIP PASS: Se è la pagina della commissione e contiene parole della tabella, va al PRIMO posto!
+        if "commissione-paritetica" in url and ("componente" in txt or "presidente" in txt):
+            pagine_prioritarie.insert(0, item) 
+        # Altre pagine della sezione dipartimento hanno priorità secondaria
+        elif "dipartimento/" in url:
+            pagine_prioritarie.append(item)
+        else:
+            altre_pagine.append(item)
+            
+    risultati_ordinati = pagine_prioritarie + altre_pagine
+
+    # 3. Formattazione finale per Llama 3.1
+    formatted_docs = []
+    for item in risultati_ordinati:
+        formatted_docs.append(f"=== FRAMMENTO ===\nURL_DA_CITARE: {item['url']}\nCONTENUTO:\n{item['text']}\n=================")
+
+    # Sostituisci il testo_ritorno e il return con:
+    istruzione = "Usa questi frammenti istituzionali per rispondere. Se ci sono tabelle, elenca chiaramente i dati. Cita l'URL_DA_CITARE.\n\n"
+    return istruzione + "\n\n".join(formatted_docs[:5])
 
 @tool
 def cerca_internazionale(query: str) -> str:
@@ -217,14 +250,8 @@ def cerca_internazionale(query: str) -> str:
         source = doc.metadata.get("source", "")
         docs_validi.append(f"=== FRAMMENTO ===\nURL_DA_CITARE: {source}\nCONTENUTO:\n{doc.page_content}\n=================")
 
-    testo_ritorno = (
-        "DATI INTERNAZIONALIZZAZIONE. "
-        "Distingui accuratamente tra istruzioni per studenti in uscita (Erasmus Outgoing) e studenti stranieri (Incoming). "
-        "Sii mirato: se chiedono i referenti, elenca solo i nomi e i contatti senza spiegare come fare domanda. "
-        "Controlla che i punti elenco non siano troncati. "
-        "Concludi con: Fonte: [URL_DA_CITARE].\n\n"
-    )
-    return testo_ritorno + "\n\n".join(docs_validi)
+    istruzione = "Usa questi frammenti sull'internazionalizzazione per rispondere. Cita l'URL_DA_CITARE.\n\n"
+    return istruzione + "\n\n".join(docs_validi)
 
 @tool
 def cerca_regolamento_voto_laurea(corso_di_laurea: str) -> str:
@@ -247,46 +274,72 @@ def cerca_regolamento_voto_laurea(corso_di_laurea: str) -> str:
     if not docs_validi:
         return f"Non ho trovato il regolamento specifico per il calcolo del voto di laurea di: {corso_di_laurea}."
 
-    testo_ritorno = (
-        "DATI REGOLAMENTO LAUREA TROVATI. "
-        "Estrai con precisione la formula di calcolo, i punti bonus previsti per la tesi e eventuali premi carriera. "
-        "CONTROLLO LOGICO: Assicurati di non troncare le formule matematiche. "
-        "Se trovi informazioni contrastanti tra diversi anni accademici, specifica a quale coorte si riferiscono. "
-        "Concludi con: Fonte: [URL_DA_CITARE].\n\n"
-    )
-    return testo_ritorno + "\n\n".join(docs_validi[:5])
+    istruzione = "Usa questi frammenti per spiegare il regolamento di laurea. Riporta le formule con precisione. Cita l'URL_DA_CITARE.\n\n"
+    return istruzione + "\n\n".join(docs_validi[:5])
 
 
 @tool
 def cerca_strutture(nome_struttura: str) -> str:
     """
     Cerca la posizione logistica, l'edificio, il piano o la stanza di aule, 
-    laboratori, uffici docenti, biblioteche e segreterie del DIEM.
+    laboratori, uffici docenti, biblioteche e segreterie del DIEM. 
+    Restituisce anche informazioni su capienza, tipologia e attrezzature.
     """
-    query_espansa = f"posizione ubicazione stanza edificio piano {nome_struttura}"
-    
-    risultati = vector_db.similarity_search(query_espansa, k=15)  # fetch più ampio per compensare il filtro
-    
     docs_validi = []
-    for doc in risultati:
-        source = doc.metadata.get("source", doc.metadata.get("local_file", "Fonte sconosciuta"))
-        
-        if "diem.unisa.it" not in source.lower():
-            continue
+    
+    nome_pulito = nome_struttura.strip()
+
+    if len(nome_pulito) <= 3 and not any(kw in nome_pulito.lower() for kw in ["aula", "lab", "sala"]):
+        termine_ricerca = f"Aula {nome_pulito.upper()}"
+    else:
+        termine_ricerca = nome_pulito
+    
+    varianti = [
+        termine_ricerca,
+        termine_ricerca.lower(),
+        termine_ricerca.title(),
+        termine_ricerca.upper()
+    ]
+    varianti = list(set(varianti))
+    
+    for variante in varianti:
             
-        docs_validi.append(f"=== FRAMMENTO ===\nURL_DA_CITARE: {source}\nCONTENUTO:\n{doc.page_content}\n=================")
+        esatti = vector_db.get(where_document={"$contains": variante})
+        if esatti and esatti.get("documents"):
+            for doc_content, meta in zip(esatti["documents"], esatti["metadatas"]):
+                source = meta.get("source", meta.get("local_file", "Fonte sconosciuta")).lower()
+                doc_type = meta.get("type", "")
+                
+                if "diem.unisa.it" in source or "corsi.unisa.it" in source or doc_type == "pdf" or "pdf" in source:
+                    url_da_citare = meta.get("source", meta.get("local_file", "Fonte sconosciuta"))
+                    docs_validi.append(f"=== FRAMMENTO ===\nURL_DA_CITARE: {url_da_citare}\nCONTENUTO:\n{doc_content}\n=================")
+
+    # --- 2. FALLBACK SEMANTICO ---
+    if not docs_validi:
+        query_espansa = f"posizione ubicazione stanza edificio piano aula laboratorio strutture-didattiche {nome_struttura}"
+        risultati = vector_db.similarity_search(query_espansa, k=10)
+        
+        for doc in risultati:
+            source = doc.metadata.get("source", doc.metadata.get("local_file", "Fonte sconosciuta")).lower()
+            doc_type = doc.metadata.get("type", "")
+            
+            if "diem.unisa.it" in source or "corsi.unisa.it" in source or doc_type == "pdf" or "pdf" in source:
+                url_da_citare = doc.metadata.get("source", doc.metadata.get("local_file", "Fonte sconosciuta"))
+                docs_validi.append(f"=== FRAMMENTO ===\nURL_DA_CITARE: {url_da_citare}\nCONTENUTO:\n{doc.page_content}\n=================")
+
+    # Rimuoviamo duplicati mantenendo l'ordine
+    docs_validi = list(dict.fromkeys(docs_validi))
 
     if not docs_validi:
-        return f"Non ho trovato informazioni logistiche sulla struttura '{nome_struttura}' nel portale del DIEM."
+        return f"Non ho trovato informazioni logistiche sulla struttura '{nome_struttura}' nei database del dipartimento o dei corsi."
 
-    testo_ritorno = (
-        "DATI LOGISTICI TROVATI. Leggi i frammenti qui sotto. "
-        "COERENZA ESTREMA: Se l'utente chiede dove si trova un'aula, rispondi SOLO con edificio, piano e stanza. "
-        "Se il frammento contiene indicazioni su come arrivare o orari di apertura della struttura, includili. "
-        "Assicurati che i punti elenco siano frasi di senso compiuto. "
-        "Concludi con: Fonte: [URL_DA_CITARE].\n\n"
+    # Sostituisci l'istruzione attuale con questa versione calibrata:
+    istruzione = (
+        "Usa questi frammenti per indicare la posizione e le caratteristiche della struttura cercata. "
+        "ATTENZIONE: Se vedi lunghi elenchi di aule e laboratori, ignorali (sono menu del sito). Estrai i dati ESCLUSIVAMENTE per la struttura richiesta dall'utente, senza associarla alle altre presenti nella lista. "
+        "Cita l'URL_DA_CITARE.\n\n"
     )
-    return testo_ritorno + "\n\n".join(docs_validi[:6])
+    return istruzione + "\n\n".join(docs_validi[:3])
 
 TOOLS = [
     cerca_docente,
@@ -297,17 +350,13 @@ TOOLS = [
     cerca_strutture,
 ]
 
-SYSTEM_PROMPT = """Sei l'assistente ufficiale del DIEM dell'Università di Salerno.
+SYSTEM_PROMPT = """Sei l'assistente ufficiale del DIEM dell'Università degli Studi di Salerno (UNISA).
+Il tuo compito è rispondere in modo chiaro e diretto alle domande degli utenti, basandoti ESCLUSIVAMENTE sui frammenti di testo forniti dai tool.
 
-Regole FONDAMENTALI (da rispettare rigorosamente):
-1. ZERO INVENZIONI: Non usare mai la tua memoria interna. Se un tool restituisce un errore, dichiara che non hai le informazioni e ASSOLUTAMENTE NON INVENTARE LINK.
-2. FILTRO URL (FONDAMENTALE): Riceverai vari frammenti di testo separati da "===" con relativi URL. 
-   - Se l'utente chiede il "curriculum", leggi e riassumi ESCLUSIVAMENTE il frammento che contiene "/curriculum" nell'URL. Ignora completamente il frammento "/home" (quindi niente stanze, telefoni o orari).
-   - Se l'utente chiede "orari" o contatti, riassumi ESCLUSIVAMENTE il frammento "/home".
-   - Se l'utente fa una domanda generale ("Chi è?"), unisci le informazioni.
-3. CITAZIONE OBBLIGATORIA: È un obbligo assoluto concludere la tua risposta con: "Fonte: [URL]". Sostituisci URL con l'URL_DA_CITARE del frammento che hai effettivamente letto.
-4. STRUTTURA E CONTROLLO LOGICO: Usa un paragrafo discorsivo iniziale e poi elenchi puntati. DEVI assicurarti che ogni punto dell'elenco sia una frase di senso compiuto. Non stampare MAI frasi troncate o monche.
-5. VIETATO ARRENDERSI: È SEVERAMENTE VIETATO dire "Non ho trovato informazioni" se il tool ti ha passato del testo utile a rispondere. Rispondi in italiano.
+REGOLE DI BASE:
+1. NON INVENTARE: Non usare mai la tua conoscenza pregressa. Se un'informazione non è nei frammenti, non scriverla (niente atenei, email, telefoni o premi inventati).
+2. STILE NATURALE: Rispondi direttamente. Non spiegare cosa stai facendo, non usare meta-frasi come "L'utente ha chiesto" o "Ecco i dati estratti".
+3. FONTE: Concludi sempre la tua risposta con "Fonte: [URL_DA_CITARE]", usando l'URL presente nel frammento che hai utilizzato.
 """
 
 prompt = ChatPromptTemplate.from_messages([

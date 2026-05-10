@@ -66,7 +66,7 @@ def main():
     
     print("\n✂️ 2. Creazione dei chunk in corso...")
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
+        chunk_size=1500,
         chunk_overlap=200,
         length_function=len,
         is_separator_regex=False,
