@@ -31,13 +31,13 @@ os.makedirs(PDF_MD_DIR, exist_ok=True)
 
 KEYWORDS = ["DIEM", "DIPARTIMENTO DI INGEGNERIA DELL'INFORMAZIONE", "INGEGNERIA INFORMATICA"]
 CORSI_DIEM_URLS = [
-    # "https://corsi.unisa.it/ingegneria-dell-informazione-per-la-medicina-digitale",
-    # "https://corsi.unisa.it/ingegneria-informatica",
-    # "https://corsi.unisa.it/electrical-engineering-for-digital-energy",
-    # "https://corsi.unisa.it/information-Engineering-for-digital-medicine",
-    # "https://corsi.unisa.it/ingegneria-informatica-magistrale",
-     "https://corsi.unisa.it/ingegneria-dell-informazione",
-    # "https://corsi.unisa.it/photovoltaics"
+    "https://corsi.unisa.it/ingegneria-dell-informazione-per-la-medicina-digitale",
+    "https://corsi.unisa.it/ingegneria-informatica",
+    "https://corsi.unisa.it/electrical-engineering-for-digital-energy",
+    "https://corsi.unisa.it/information-Engineering-for-digital-medicine",
+    "https://corsi.unisa.it/ingegneria-informatica-magistrale",
+    "https://corsi.unisa.it/ingegneria-dell-informazione",
+    "https://corsi.unisa.it/photovoltaics"
 ]
 
 # --- GESTIONE DELLO STATO (INCREMENTAL SCRAPING) ---
@@ -204,10 +204,9 @@ async def crawl_task(task, crawler, state, doc_dict):
 
             js_cleanup = """
             const selectors = [
-                '#off-rubrica', '#off-search', '#off-language', '#off-servizi-on-line', '#off-profili',
-                '#menu-bar', '#box-agenda',
-                '.homeBox', '#logo-footer',
-                '.modal', '#blueimp-gallery', '.blueimp-gallery', '.blueimp-gallery-controls',
+                '#off-search', '#off-language', '#off-servizi-on-line', '#off-profili',
+                '#box-agenda', '.homeBox', '#logo-footer',
+                '.modal', '#blueimp-gallery', '.blueimp-gallery-controls',
                 '.carousel-control', '.carousel-indicators', '.control-box', '#go_down', '#pause', '#resize',
                 '#scrollUp_div', '.fc-toolbar', '.fc-header-toolbar', '#scrollUp',
                 '#cookie-bar', '#unisa-utilities-bar', '.bg-footer', '.sub-footer'
@@ -220,7 +219,7 @@ async def crawl_task(task, crawler, state, doc_dict):
                 config=CrawlerRunConfig(
                     cache_mode=CacheMode.BYPASS,
                     word_count_threshold=0,
-                    excluded_tags=['nav', 'footer', 'header', 'aside', 'form', 'noscript'],
+                    excluded_tags=['footer', 'header', 'form', 'noscript'],
                     js_code=[js_cleanup] 
                     ),
                 max_concurrent=10
@@ -230,6 +229,10 @@ async def crawl_task(task, crawler, state, doc_dict):
 
             for result in results:
                 if not result.success:
+                    continue
+
+                if result.status_code and result.status_code != 200:
+                    print(f"  [{result.status_code}] Salto: {result.url}")
                     continue
 
                 cleaned_markdown = clean_md(result.markdown)
@@ -294,16 +297,16 @@ async def main():
     doc_dict = load_knowledge_base()
 
     SEARCH_TASKS = [
-        # {"name": "Sito DIEM", 
-        #  "urls": ["https://www.diem.unisa.it/"], 
-        #  "depth": 3, 
-        #  "filter": False, 
-        #  "allowed_base": None},
-        # {"name": "Docenti", 
-        #  "urls": ["https://docenti.unisa.it/"], 
-        #  "depth": 2, 
-        #  "filter": True,
-        #  "allowed_base": None},
+        {"name": "Sito DIEM", 
+         "urls": ["https://www.diem.unisa.it/"], 
+         "depth": 3, 
+         "filter": False, 
+         "allowed_base": None},
+        {"name": "Docenti", 
+         "urls": ["https://docenti.unisa.it/"], 
+         "depth": 2, 
+         "filter": True,
+         "allowed_base": None},
         {"name": "Corsi DIEM", 
          "urls": CORSI_DIEM_URLS, 
          "depth": 3, 
