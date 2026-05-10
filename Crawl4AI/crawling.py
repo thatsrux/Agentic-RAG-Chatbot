@@ -22,7 +22,7 @@ logging.getLogger("pypdf").setLevel(logging.ERROR)
 # --- CONFIGURAZIONE ---
 DATA_PATH = r"data"
 PAGES_DIR = os.path.join(DATA_PATH, "pages")     
-PDF_MD_DIR = os.path.join(DATA_PATH, "pdf_md")   
+PDF_MD_DIR = os.path.join(DATA_PATH, "PDFs")   
 STATE_FILE = "crawler_state.json"
 KB_FILE = "knowledge_base.pkl"
 
@@ -35,8 +35,8 @@ CORSI_DIEM_URLS = [
     "https://corsi.unisa.it/ingegneria-informatica",
     "https://corsi.unisa.it/electrical-engineering-for-digital-energy",
     "https://corsi.unisa.it/information-Engineering-for-digital-medicine",
-    "https://corsi.unisa.it/ingegneria-informatica-magistrale",
-    "https://corsi.unisa.it/ingegneria-dell-informazione",
+    "https://corsi.unisa.it/0650107303300001", #"https://corsi.unisa.it/ingegneria-informatica-magistrale",
+    "https://corsi.unisa.it/DOT18CK8F9",       # https://corsi.unisa.it/ingegneria-dell-informazione
     "https://corsi.unisa.it/photovoltaics"
 ]
 
@@ -147,13 +147,12 @@ def download_and_parse_pdf(pdf_url, state, doc_dict):
     except Exception as e:
         print(f"  [!] Errore parsing PDF: {e}")
 
-def extract_links_and_pdfs(html, current_url, start_url, allowed_base=None):
+def extract_links_and_pdfs(html, current_url, start_url):
     soup = BeautifulSoup(html, "html.parser")
     links_to_visit = []
     pdfs_to_download = []
     
-    # Se allowed_base è definito, si usa quello come confine; altrimenti start_url
-    boundary = (allowed_base or start_url).lower().rstrip('/')
+    boundary = start_url.lower().rstrip('/')
     allowed_domain = urlparse(boundary).netloc
 
     for a in soup.find_all('a', href=True):
@@ -186,7 +185,6 @@ async def crawl_task(task, crawler, state, doc_dict):
     start_urls = task["urls"]
     max_depth = task["depth"]
     use_filter = task["filter"]
-    allowed_base = task.get("allowed_base")
 
     print(f"\n{'='*20} INIZIO TASK: {name} {'='*20}")
     visited = set()
@@ -275,7 +273,7 @@ async def crawl_task(task, crawler, state, doc_dict):
                             print(f"  [SKIPPED] Testo troppo corto dopo la pulizia: {result.url}")
 
                 if depth < max_depth and should_explore:
-                    new_links, pdfs = extract_links_and_pdfs(result.html, result.url, start_url, allowed_base)
+                    new_links, pdfs = extract_links_and_pdfs(result.html, result.url, start_url)
 
                     # --- NUOVA STAMPA VISIVA ---
                     if not content_changed:
@@ -300,18 +298,15 @@ async def main():
         {"name": "Sito DIEM", 
          "urls": ["https://www.diem.unisa.it/"], 
          "depth": 3, 
-         "filter": False, 
-         "allowed_base": None},
+         "filter": False},
         {"name": "Docenti", 
          "urls": ["https://docenti.unisa.it/"], 
          "depth": 2, 
-         "filter": True,
-         "allowed_base": None},
+         "filter": True},
         {"name": "Corsi DIEM", 
          "urls": CORSI_DIEM_URLS, 
          "depth": 3, 
-         "filter": False, 
-         "allowed_base": "https://corsi.unisa.it/"}
+         "filter": False}
     ]
 
     async with AsyncWebCrawler(verbose=False) as crawler:
