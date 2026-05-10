@@ -2,6 +2,7 @@
 *.pdf
 *.md
 *.txt
+*.json
 markdown_estratti/
 
 # Ignore serialized / binary files
@@ -11,3 +12,4 @@ markdown_estratti/
 
 # Ignore database files
 *.sqlite3
+vectorstores/
