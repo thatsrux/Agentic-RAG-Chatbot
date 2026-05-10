@@ -1,222 +1,153 @@
-"""
-STEP 4 — CHATBOT STREAMLIT
-Pipeline completa con:
-  - Conversational Query Rewriting (Llama 3.1 via Ollama)
-  - Retrieval ibrido (retriever.py)
-  - Out-of-domain detection
-  - Anti-allucinazione
-  - Robustness ("Sei sicuro?", ecc.)
-  - Visualizzazione fonti e query riscritta
-
-Avvio: streamlit run chatbot.py
-Requisito: Ollama in esecuzione con llama3.1 scaricato
-  → ollama pull llama3.1
-  → ollama serve
-"""
-
+import os
 import streamlit as st
+
+# --- PROTEZIONE CRASH (WINDOWS/STREAMLIT) ---
+# Queste impostazioni devono essere in cima per evitare conflitti tra i thread
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["OMP_NUM_THREADS"] = "1"
+
 from langchain_ollama import ChatOllama
-from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from retriever import get_retriever
+from retriever import HybridRetriever
 
 # --- CONFIGURAZIONE ---
-OLLAMA_MODEL = "llama3.1"
+OLLAMA_MODEL = "llama3.2" 
 
 SYSTEM_PROMPT = """
-Sei DIEMbot, l'assistente virtuale del DIEM (Dipartimento di Ingegneria \
-dell'Informazione e Elettronica) dell'Università di Salerno.
+Sei DIEMbot, l'assistente virtuale del DIEM (Dipartimento di Ingegneria dell'Informazione ed Elettrica e Matematica applicata) dell'Università di Salerno.
 
 REGOLE FONDAMENTALI:
-1. Rispondi SOLO in base ai documenti forniti nel contesto. Non usare conoscenze esterne.
-2. Se l'informazione non è presente nei documenti rispondi:
-   "Non ho trovato informazioni su questo nelle fonti del DIEM."
-3. Se la domanda non riguarda il DIEM, i suoi corsi, docenti o strutture rispondi:
-   "Posso rispondere solo a domande riguardanti il DIEM e l'Università di Salerno."
-4. Se l'utente dice "Sei sicuro?" o mette in dubbio la risposta, riconferma
-   quanto presente nei documenti oppure ammetti l'incertezza se i doc non sono chiari.
-5. Non inventare nomi, date, link o numeri non presenti nei documenti.
-6. Rispondi in italiano, a meno che l'utente non scriva in inglese.
+1. Rispondi in italiano in modo professionale e cordiale.
+2. Basati ESCLUSIVAMENTE sui documenti forniti nel "Contesto".
+3. Se l'informazione non è presente nei documenti, rispondi onestamente che non disponi di quei dati. Non inventare nulla.
+4. Indica sempre la fonte delle informazioni (es. "In base al sito dei docenti...") se disponibile nel contesto.
 """
 
 RAG_PROMPT = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
-    ("human", """Domanda: {question}
-
-Documenti di riferimento:
-{context}
-
-Risposta:"""),
+    ("human", "Contesto estratto dai documenti:\n{context}\n\nDomanda dell'utente: {question}")
 ])
 
-REWRITE_PROMPT = PromptTemplate.from_template("""
-Sei un assistente che ottimizza le query di ricerca.
-Data la cronologia della conversazione e l'ultima domanda, riscrivila
-come query autonoma risolvendo pronomi e riferimenti impliciti ai turni precedenti.
-Se è già autonoma, riscrivila identica.
-Rispondi con SOLO la domanda riscritta, senza spiegazioni.
+# --- INIZIALIZZAZIONE RISORSE ---
+@st.cache_resource(show_spinner=False)
+def load_llm():
+    """Carica il modello LLM (Ollama) nella cache di sistema."""
+    return ChatOllama(
+        model=OLLAMA_MODEL, 
+        temperature=0.1,
+        num_ctx=2048 # Dà a Ollama più respiro per la memoria del contesto
+    )
 
-Cronologia:
-{history}
-
-Ultima domanda: {query}
-
-Domanda riscritta:
-""")
-
-
-@st.cache_resource
-def load_resources():
-    """Carica retriever e LLM una sola volta (Streamlit cache)."""
-    retriever = get_retriever()
-    llm = ChatOllama(model=OLLAMA_MODEL, temperature=0.1)
-    return retriever, llm
-
-
-def rewrite_query(query: str, history: list[dict], llm) -> str:
-    """Riscrive la query incorporando il contesto degli ultimi 4 turni."""
-    if not history:
-        return query
-
-    history_text = ""
-    for turn in history[-4:]:
-        role = "Utente" if turn["role"] == "user" else "Assistente"
-        history_text += f"{role}: {turn['content']}\n"
-
-    chain = REWRITE_PROMPT | llm | StrOutputParser()
-    try:
-        return chain.invoke({"history": history_text, "query": query}).strip()
-    except Exception:
-        return query
-
-
-def format_context(docs) -> str:
+# --- FUNZIONI DI SUPPORTO ---
+def format_context(docs):
+    """Formatta i documenti per il prompt dell'LLM."""
+    if not docs:
+        return "Nessun documento rilevante trovato."
+    
     parts = []
     for i, doc in enumerate(docs):
-        source = doc.metadata.get("source", "fonte sconosciuta")
-        doc_type = "PDF" if doc.metadata.get("type") == "pdf" else "Pagina web"
-        parts.append(
-            f"[Documento {i+1} — {doc_type}: {source}]\n{doc.page_content}"
-        )
+        source = doc.metadata.get("source", "Fonte sconosciuta")
+        parts.append(f"[Documento {i+1} | Fonte: {source}]\n{doc.page_content}")
     return "\n\n---\n\n".join(parts)
 
-
-def ask(
-    query: str,
-    history: list[dict],
-    retriever,
-    llm,
-) -> tuple[str, list, str]:
-    """
-    1. Conversational rewriting
-    2. Retrieval ibrido + reranking
-    3. Generazione risposta
-    """
-    rewritten = rewrite_query(query, history, llm)
-    docs = retriever.retrieve(rewritten)
-    context = format_context(docs) if docs else "Nessun documento trovato."
-    chain = RAG_PROMPT | llm | StrOutputParser()
-    response = chain.invoke({"question": rewritten, "context": context})
-    return response, docs, rewritten
-
-
-# --- INTERFACCIA ---
-
+# --- INTERFACCIA STREAMLIT ---
 def main():
     st.set_page_config(
-        page_title="DIEMbot — Assistente DIEM UniSa",
+        page_title="DIEMbot — Università di Salerno",
         page_icon="🎓",
         layout="centered",
     )
 
     st.title("🎓 DIEMbot")
-    st.caption("Assistente virtuale del DIEM – Università di Salerno")
+    st.caption("Assistente virtuale ufficiale del DIEM – Università di Salerno")
 
-    with st.spinner("Caricamento modelli in corso..."):
-        retriever, llm = load_resources()
+    # Inizializzazione Retriever (nella sessione per evitare ricaricamenti)
+    if "retriever" not in st.session_state:
+        with st.spinner("Caricamento del database della conoscenza (FAISS)..."):
+            # Istanziamo la classe dal file retriever.py
+            st.session_state.retriever = HybridRetriever()
+            st.success("Database caricato con successo!")
 
+    llm = load_llm()
+
+    # Gestione cronologia chat
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    if "show_sources" not in st.session_state:
-        st.session_state.show_sources = True
-
+    
     # Sidebar
     with st.sidebar:
         st.header("Impostazioni")
-        st.session_state.show_sources = st.toggle(
-            "Mostra fonti", value=st.session_state.show_sources
-        )
-        if st.button("🗑️ Nuova conversazione"):
+        show_sources = st.toggle("Mostra fonti estratte", value=True)
+        if st.button("🗑️ Cancella cronologia chat", use_container_width=True):
             st.session_state.messages = []
             st.rerun()
-
+            
         st.divider()
         st.markdown("**Esempi di domande:**")
-        examples = [
-            "Quali corsi offre il DIEM?",
-            "Quali sono i requisiti di ammissione?",
-            "Come contatto un docente?",
-            "Dove si trova il DIEM?",
-        ]
-        for ex in examples:
-            if st.button(ex, use_container_width=True):
-                st.session_state.pending = ex
+        if st.button("Quali sono i corsi di laurea del DIEM?"):
+            st.session_state.pending_question = "Quali sono i corsi di laurea del DIEM?"
+        if st.button("Dove trovo gli orari delle lezioni?"):
+            st.session_state.pending_question = "Dove trovo gli orari delle lezioni?"
 
-    # Storico messaggi
+    # Visualizzazione messaggi precedenti
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-            if (msg["role"] == "assistant"
-                    and st.session_state.show_sources
-                    and msg.get("sources")):
-                with st.expander("📄 Fonti"):
-                    for i, src in enumerate(msg["sources"]):
-                        st.caption(f"**[{i+1}]** {src}")
-            if (msg["role"] == "assistant"
-                    and msg.get("rewritten")
-                    and msg["rewritten"] != msg.get("original")):
-                with st.expander("🔍 Query interpretata"):
-                    st.caption(f"*{msg['rewritten']}*")
+            if msg["role"] == "assistant" and show_sources and msg.get("sources"):
+                with st.expander("📄 Fonti consultate"):
+                    for src in msg["sources"]:
+                        st.caption(f"• {src}")
 
-    # Input
-    user_input = st.chat_input("Scrivi la tua domanda sul DIEM...")
-    if hasattr(st.session_state, "pending") and st.session_state.pending:
-        user_input = st.session_state.pending
-        st.session_state.pending = None
+    # Input utente
+    user_input = st.chat_input("Chiedimi qualcosa sul DIEM...")
+    
+    # Gestione domande dai pulsanti della sidebar
+    if hasattr(st.session_state, "pending_question") and st.session_state.pending_question:
+        user_input = st.session_state.pending_question
+        del st.session_state.pending_question
 
     if user_input:
+        # Aggiungi domanda utente
         st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
             st.markdown(user_input)
 
+        # Risposta assistente
         with st.chat_message("assistant"):
-            with st.spinner("Cerco nelle fonti DIEM..."):
-                response, docs, rewritten = ask(
-                    user_input,
-                    st.session_state.messages[:-1],
-                    retriever,
-                    llm,
-                )
+            # 1. Retrieval
+            with st.spinner("Consultazione documenti..."):
+                docs = st.session_state.retriever.retrieve(user_input)
+                context = format_context(docs)
+                sources_list = list(set([d.metadata.get("source", "N/A") for d in docs]))
+            
+            # 2. Generazione con Streaming
+            with st.spinner("Generazione risposta..."):
+                chain = RAG_PROMPT | llm | StrOutputParser()
+                
+                response_placeholder = st.empty()
+                full_response = ""
+                
+                # Streaming della risposta parola per parola
+                for chunk in chain.stream({"context": context, "question": user_input}):
+                    full_response += chunk
+                    response_placeholder.markdown(full_response + "▌")
+                
+                # Risposta definitiva senza cursore
+                response_placeholder.markdown(full_response)
+                
+                # Mostra fonti se abilitato
+                if show_sources and sources_list:
+                    with st.expander("📄 Fonti consultate"):
+                        for src in sources_list:
+                            st.caption(f"• {src}")
 
-            st.markdown(response)
-
-            sources = [d.metadata.get("source", "?") for d in docs]
-            if st.session_state.show_sources and sources:
-                with st.expander("📄 Fonti"):
-                    for i, src in enumerate(sources):
-                        st.caption(f"**[{i+1}]** {src}")
-            if rewritten != user_input:
-                with st.expander("🔍 Query interpretata"):
-                    st.caption(f"*{rewritten}*")
-
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": response,
-            "sources": sources,
-            "rewritten": rewritten,
-            "original": user_input,
-        })
-
+            # Salva in cronologia
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": full_response,
+                "sources": sources_list
+            })
 
 if __name__ == "__main__":
     main()

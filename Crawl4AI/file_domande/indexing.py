@@ -218,80 +218,80 @@ def main():
     # ── PDF: ParentDocumentRetriever ──
     build_pdf_retriever(pdf_docs, embedding_model)
 
-    # ── WEB: Hypothetical Questions ──
-    existing = {}
-    if os.path.exists(HYP_FILE):
-        with open(HYP_FILE, "r", encoding="utf-8") as f:
-            existing = json.load(f)
-        print(f"[HYP] {len(existing)} entry già processate, salto rielaborazione.")
+    # # ── WEB: Hypothetical Questions ──
+    # existing = {}
+    # if os.path.exists(HYP_FILE):
+    #     with open(HYP_FILE, "r", encoding="utf-8") as f:
+    #         existing = json.load(f)
+    #     print(f"[HYP] {len(existing)} entry già processate, salto rielaborazione.")
 
-    llm = ChatOllama(model=OLLAMA_MODEL, temperature=0)
-    chain = HYP_PROMPT | llm | StrOutputParser()
+    # llm = ChatOllama(model=OLLAMA_MODEL, temperature=0)
+    # chain = HYP_PROMPT | llm | StrOutputParser()
 
-    print(f"\n[HYP] Generazione domande ({N_QUESTIONS} per chunk) con {OLLAMA_MODEL}...")
+    # print(f"\n[HYP] Generazione domande ({N_QUESTIONS} per chunk) con {OLLAMA_MODEL}...")
     
-    # --- NUOVA GESTIONE MULTITHREADING ---
-    hyp_docs = []
-    updated = dict(existing)
+    # # --- NUOVA GESTIONE MULTITHREADING ---
+    # hyp_docs = []
+    # updated = dict(existing)
     
-    # Filtriamo prima i chunk da elaborare per non sprecare thread
-    chunks_to_process = []
-    for chunk in web_chunks:
-        content = chunk.page_content.strip()
-        chunk_id = chunk.metadata.get("source", "") + "::" + content[:80]
+    # # Filtriamo prima i chunk da elaborare per non sprecare thread
+    # chunks_to_process = []
+    # for chunk in web_chunks:
+    #     content = chunk.page_content.strip()
+    #     chunk_id = chunk.metadata.get("source", "") + "::" + content[:80]
         
-        if chunk_id in existing:
-            for q in existing[chunk_id]:
-                hyp_docs.append(Document(page_content=q, metadata={**chunk.metadata, "original_content": content}))
-        elif len(content) >= MIN_CHUNK_LEN:
-            chunks_to_process.append((chunk_id, content, chunk))
+    #     if chunk_id in existing:
+    #         for q in existing[chunk_id]:
+    #             hyp_docs.append(Document(page_content=q, metadata={**chunk.metadata, "original_content": content}))
+    #     elif len(content) >= MIN_CHUNK_LEN:
+    #         chunks_to_process.append((chunk_id, content, chunk))
 
-    print(f"  [HYP] {len(chunks_to_process)} nuovi chunk da far elaborare al LLM.")
+    # print(f"  [HYP] {len(chunks_to_process)} nuovi chunk da far elaborare al LLM.")
 
-    def process_single_chunk(data):
-        c_id, text, orig_chunk = data
-        try:
-            out = chain.invoke({"chunk": text, "n": N_QUESTIONS})
-            if "NO_OUTPUT" in out:
-                return c_id, [], orig_chunk, text
+    # def process_single_chunk(data):
+    #     c_id, text, orig_chunk = data
+    #     try:
+    #         out = chain.invoke({"chunk": text, "n": N_QUESTIONS})
+    #         if "NO_OUTPUT" in out:
+    #             return c_id, [], orig_chunk, text
             
-            qs = [q.strip() for q in out.strip().split("\n") if q.strip() and len(q.strip()) > 10][:N_QUESTIONS]
-            return c_id, qs, orig_chunk, text
-        except Exception as e:
-            return c_id, None, orig_chunk, text
+    #         qs = [q.strip() for q in out.strip().split("\n") if q.strip() and len(q.strip()) > 10][:N_QUESTIONS]
+    #         return c_id, qs, orig_chunk, text
+    #     except Exception as e:
+    #         return c_id, None, orig_chunk, text
 
-    # Usiamo 4 "lavoratori" in parallelo (se hai una GPU potente puoi salire a 8)
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {executor.submit(process_single_chunk, item): item for item in chunks_to_process}
+    # # Usiamo 4 "lavoratori" in parallelo (se hai una GPU potente puoi salire a 8)
+    # with ThreadPoolExecutor(max_workers=4) as executor:
+    #     futures = {executor.submit(process_single_chunk, item): item for item in chunks_to_process}
         
-        completed = 0
-        for future in as_completed(futures):
-            c_id, qs, orig_chunk, text = future.result()
-            completed += 1
+    #     completed = 0
+    #     for future in as_completed(futures):
+    #         c_id, qs, orig_chunk, text = future.result()
+    #         completed += 1
             
-            if qs is not None:
-                updated[c_id] = qs
-                for q in qs:
-                    hyp_docs.append(Document(page_content=q, metadata={**orig_chunk.metadata, "original_content": text}))
+    #         if qs is not None:
+    #             updated[c_id] = qs
+    #             for q in qs:
+    #                 hyp_docs.append(Document(page_content=q, metadata={**orig_chunk.metadata, "original_content": text}))
             
-            if completed % 20 == 0:
-                print(f"  [HYP] {completed}/{len(chunks_to_process)} elaborati in parallelo...")
+    #         if completed % 20 == 0:
+    #             print(f"  [HYP] {completed}/{len(chunks_to_process)} elaborati in parallelo...")
 
-    # -------------------------------------
+    # # -------------------------------------
 
-    with open(HYP_FILE, "w", encoding="utf-8") as f:
-        json.dump(updated, f, ensure_ascii=False, indent=2)
-    print(f"[HYP] {len(hyp_docs)} domande salvate in {HYP_FILE}")
+    # with open(HYP_FILE, "w", encoding="utf-8") as f:
+    #     json.dump(updated, f, ensure_ascii=False, indent=2)
+    # print(f"[HYP] {len(hyp_docs)} domande salvate in {HYP_FILE}")
 
-    # Vector store domande ipotetiche
-    build_faiss(hyp_docs, embedding_model, "vectorstore_hyp")
+    # # Vector store domande ipotetiche
+    # build_faiss(hyp_docs, embedding_model, "vectorstore_hyp")
 
     # Vector store chunk web raw (fallback)
     build_faiss(web_chunks, embedding_model, "vectorstore_std")
 
     print(f"\n{'='*40}")
     print("Indicizzazione completata.")
-    print(f"  HypQ docs : {len(hyp_docs)}")
+    #print(f"  HypQ docs : {len(hyp_docs)}")
     print(f"  Std docs  : {len(web_chunks)}")
     print(f"  PDF docs  : {len(pdf_docs)} (ParentDocumentRetriever)")
     print(f"{'='*40}")
