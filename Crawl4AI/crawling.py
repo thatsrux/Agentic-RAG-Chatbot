@@ -31,13 +31,13 @@ os.makedirs(PDF_MD_DIR, exist_ok=True)
 
 KEYWORDS = ["DIEM", "DIPARTIMENTO DI INGEGNERIA DELL'INFORMAZIONE", "INGEGNERIA INFORMATICA"]
 CORSI_DIEM_URLS = [
-    "https://corsi.unisa.it/ingegneria-dell-informazione-per-la-medicina-digitale",
-    "https://corsi.unisa.it/ingegneria-informatica",
-    "https://corsi.unisa.it/electrical-engineering-for-digital-energy",
-    "https://corsi.unisa.it/information-Engineering-for-digital-medicine",
-    "https://corsi.unisa.it/ingegneria-informatica-magistrale",
-    "https://corsi.unisa.it/ingegneria-dell-informazione",
-    "https://corsi.unisa.it/photovoltaics"
+    # "https://corsi.unisa.it/ingegneria-dell-informazione-per-la-medicina-digitale",
+    # "https://corsi.unisa.it/ingegneria-informatica",
+    # "https://corsi.unisa.it/electrical-engineering-for-digital-energy",
+    # "https://corsi.unisa.it/information-Engineering-for-digital-medicine",
+    # "https://corsi.unisa.it/ingegneria-informatica-magistrale",
+     "https://corsi.unisa.it/ingegneria-dell-informazione",
+    # "https://corsi.unisa.it/photovoltaics"
 ]
 
 # --- GESTIONE DELLO STATO (INCREMENTAL SCRAPING) ---
@@ -93,7 +93,7 @@ def is_relevant(text, url):
         print(f"  [FILTRO] ❌ SCARTATO: {url}")
     return is_valid
 
-def is_recent_pdf(pdf_url, headers):
+def is_recent_pdf(pdf_url):
     year_matches = re.findall(r'(?<!\d)20\d{2}(?!\d)', pdf_url)
     if year_matches:
         return any(int(y) >= 2020 for y in year_matches)
@@ -107,7 +107,8 @@ def download_and_parse_pdf(pdf_url, state, doc_dict):
         res = requests.get(pdf_url, timeout=10)
         if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', '').lower():
             
-            if not is_recent_pdf(pdf_url, res.headers):
+            if not is_recent_pdf(pdf_url):
+                print(f"  [SKIP] PDF antecedente al 2020: {pdf_url}")
                 return
 
             file_hash = hashlib.md5(res.content).hexdigest()
@@ -146,36 +147,38 @@ def download_and_parse_pdf(pdf_url, state, doc_dict):
     except Exception as e:
         print(f"  [!] Errore parsing PDF: {e}")
 
-def extract_links_and_pdfs(html, current_url, start_url):
+def extract_links_and_pdfs(html, current_url, start_url, allowed_base=None):
     soup = BeautifulSoup(html, "html.parser")
     links_to_visit = []
     pdfs_to_download = []
-    allowed_domain = urlparse(start_url).netloc  
     
+    # Se allowed_base è definito, si usa quello come confine; altrimenti start_url
+    boundary = (allowed_base or start_url).lower().rstrip('/')
+    allowed_domain = urlparse(boundary).netloc
+
     for a in soup.find_all('a', href=True):
         href = a['href']
         if not href.startswith(('http', '/', '#')):
             href = '/' + href
 
         full_url = urljoin(current_url, href).split('#')[0]
-        link_domain = urlparse(full_url).netloc
-        
+        parsed = urlparse(full_url)
+        link_domain = parsed.netloc
+
         if full_url.lower().endswith('.pdf') or '/pdf/' in full_url.lower():
             if link_domain == allowed_domain:
                 pdfs_to_download.append(full_url)
-                
-        elif full_url.startswith(start_url):
+
+        elif full_url.lower().startswith(boundary):  # ← confronto lowercase unificato
             if allowed_domain == "docenti.unisa.it":
-                path_parts = [p for p in urlparse(full_url).path.split('/') if p]
-                if path_parts:
-                    prof_id_or_name = path_parts[0]
-                    if '.' in prof_id_or_name:
-                        continue 
-            
+                path_parts = [p for p in parsed.path.split('/') if p]
+                if path_parts and '.' in path_parts[0]:
+                    continue
+
             if not any(full_url.lower().endswith(ext) for ext in ['.css', '.js', '.png', '.jpg', '.jpeg']):
                 if '/en/' not in full_url and not full_url.endswith('/en'):
                     links_to_visit.append(full_url)
-                
+
     return list(set(links_to_visit)), list(set(pdfs_to_download))
 
 async def crawl_task(task, crawler, state, doc_dict):
@@ -183,6 +186,7 @@ async def crawl_task(task, crawler, state, doc_dict):
     start_urls = task["urls"]
     max_depth = task["depth"]
     use_filter = task["filter"]
+    allowed_base = task.get("allowed_base")
 
     print(f"\n{'='*20} INIZIO TASK: {name} {'='*20}")
     visited = set()
@@ -268,7 +272,12 @@ async def crawl_task(task, crawler, state, doc_dict):
                             print(f"  [SKIPPED] Testo troppo corto dopo la pulizia: {result.url}")
 
                 if depth < max_depth and should_explore:
-                    new_links, pdfs = extract_links_and_pdfs(result.html, result.url, start_url)
+                    new_links, pdfs = extract_links_and_pdfs(result.html, result.url, start_url, allowed_base)
+
+                    # --- NUOVA STAMPA VISIVA ---
+                    if not content_changed:
+                         print(f"    ↳ [ESPLORAZIONE] Estratti {len(new_links)} link e {len(pdfs)} PDF dalla pagina in cache.")
+                    # --------------------------
 
                     for pdf_url in pdfs:
                         download_and_parse_pdf(pdf_url, state, doc_dict)
@@ -285,9 +294,21 @@ async def main():
     doc_dict = load_knowledge_base()
 
     SEARCH_TASKS = [
-        #{"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 3, "filter": False},
-        #{"name": "Docenti", "urls": ["https://docenti.unisa.it/"], "depth": 2, "filter": True},
-        {"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 3, "filter": False}
+        # {"name": "Sito DIEM", 
+        #  "urls": ["https://www.diem.unisa.it/"], 
+        #  "depth": 3, 
+        #  "filter": False, 
+        #  "allowed_base": None},
+        # {"name": "Docenti", 
+        #  "urls": ["https://docenti.unisa.it/"], 
+        #  "depth": 2, 
+        #  "filter": True,
+        #  "allowed_base": None},
+        {"name": "Corsi DIEM", 
+         "urls": CORSI_DIEM_URLS, 
+         "depth": 3, 
+         "filter": False, 
+         "allowed_base": "https://corsi.unisa.it/"}
     ]
 
     async with AsyncWebCrawler(verbose=False) as crawler:
