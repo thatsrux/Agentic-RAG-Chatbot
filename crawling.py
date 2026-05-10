@@ -1,233 +1,325 @@
-import logging
 import os
+import requests
+import pickle
 import asyncio
-import hashlib
-import aiohttp
-import io
+import logging
 import re
+import hashlib
+import json
+import io
+from urllib.parse import urljoin, urlparse
+from bs4 import BeautifulSoup
+
+# Parsing PDF al volo
 from pypdf import PdfReader
-from urllib.parse import urlparse, urljoin
-from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode
-from tqdm.asyncio import tqdm
+
+# Importiamo Crawl4AI e i Documenti di LangChain
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
+from langchain_core.documents import Document
 
 logging.getLogger("pypdf").setLevel(logging.ERROR)
 
+# --- CONFIGURAZIONE ---
 DATA_PATH = r"data"
-PAGES_DIR = os.path.join(DATA_PATH, "pages")
-PDFS_DIR = os.path.join(DATA_PATH, "PDFs")
+PAGES_DIR = os.path.join(DATA_PATH, "pages")     # Per il markdown delle pagine web
+PDF_MD_DIR = os.path.join(DATA_PATH, "PDFs")   # Per il markdown estratto dai PDF
+STATE_FILE = "crawler_state.json"
+KB_FILE = "knowledge_base.pkl"
 
 os.makedirs(PAGES_DIR, exist_ok=True)
-os.makedirs(PDFS_DIR, exist_ok=True)
+os.makedirs(PDF_MD_DIR, exist_ok=True)
 
-TARGET_SITES = [
-    {"url": "https://www.diem.unisa.it/", "max_depth": 3},
-    {"url": "https://docenti.unisa.it/", "max_depth": 2},
-    {"url": "https://corsi.unisa.it/ingegneria-dell-informazione-per-la-medicina-digitale", "max_depth": 3},
-    {"url": "https://corsi.unisa.it/ingegneria-informatica", "max_depth": 3},
-    {"url": "https://corsi.unisa.it/electrical-engineering-for-digital-energy", "max_depth": 3},
-    {"url": "https://corsi.unisa.it/information-Engineering-for-digital-medicine", "max_depth": 3},
-    {"url": "https://corsi.unisa.it/ingegneria-informatica-magistrale", "max_depth": 3},
-    {"url": "https://corsi.unisa.it/ingegneria-dell-informazione", "max_depth": 3},
-    {"url": "https://corsi.unisa.it/photovoltaics", "max_depth": 3}
+KEYWORDS = ["DIEM", "DIPARTIMENTO DI INGEGNERIA DELL'INFORMAZIONE", "INGEGNERIA INFORMATICA"]
+CORSI_DIEM_URLS = [
+    "https://corsi.unisa.it/ingegneria-dell-informazione-per-la-medicina-digitale",
+    "https://corsi.unisa.it/ingegneria-informatica",
+    "https://corsi.unisa.it/electrical-engineering-for-digital-energy",
+    "https://corsi.unisa.it/information-Engineering-for-digital-medicine",
+    "https://corsi.unisa.it/ingegneria-informatica-magistrale",
+    "https://corsi.unisa.it/ingegneria-dell-informazione",
+    "https://corsi.unisa.it/photovoltaics"
 ]
 
-def get_domain(url):
-    """Estrae il dominio da un URL per limitare la navigazione."""
-    return urlparse(url).netloc
+# --- GESTIONE DELLO STATO (INCREMENTAL SCRAPING) ---
 
-def generate_safe_filename(url, is_pdf):
-    """Genera un nome file usando l'URL completo, sostituendo i caratteri non ammessi dall'OS."""
-    clean_url = url.replace("https://", "").replace("http://", "")
-    
-    safe_name = re.sub(r'[\/\\?%*:|"<>&=]+', '_', clean_url)
-    
-    safe_name = safe_name.strip('_')
-    
-    if len(safe_name) > 200:
-        url_hash = hashlib.md5(url.encode('utf-8')).hexdigest()[:8]
-        safe_name = safe_name[:190] + "_" + url_hash
-        
-    ext = ".md"
-    
-    return f"{safe_name}{ext}"
+def load_state():
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"web": {}, "pdfs": {}}
+
+def save_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=4)
+
+def load_knowledge_base():
+    """Carica la KB esistente (ora contiene sia web che PDF testuali)."""
+    if os.path.exists(KB_FILE):
+        with open(KB_FILE, "rb") as f:
+            docs = pickle.load(f)
+            return {doc.metadata.get("source"): doc for doc in docs}
+    return {}
+
+# --- FUNZIONI DI SUPPORTO ---
 
 def clean_md(md_content):
     """Pulisce il markdown rimuovendo menu laterali, intestazioni e footer."""
+    if not md_content:
+        return ""
+        
     clean_text = md_content.strip()
     
     clean_text = re.sub(r'\[skip to main content\].*?Condividi\s*(?:\d+\.\s*\[\]\(.*?\)\s*)*', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
-    
     clean_text = re.sub(r'\* \[Home \]\(.*?\).*?\[Contatti \]\(.*?\)', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
     clean_text = re.sub(r'\* \[Presentazione \]\(.*?\).*?\[Strutture \]\(.*?\)', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
-    
     clean_text = re.sub(r'\[Vai al Contenuto della Pagina\].*', '', clean_text, flags=re.DOTALL | re.IGNORECASE)
     
     return clean_text.strip()
 
-async def process_pdf(url, session, global_visited, source_page, depth, max_depth):
-    """Scarica ed estrae il testo da un PDF in modo asincrono."""
-    if url in global_visited:
+def is_relevant(text, url):
+    text_upper = text.upper()
+    is_valid = any(kw in text_upper for kw in KEYWORDS)
+    if is_valid:
+        print(f"  [FILTRO] ✅ ACCETTATO: {url}")
+    else:
+        print(f"  [FILTRO] ❌ SCARTATO: {url}")
+    return is_valid
+
+def is_recent_pdf(pdf_url, headers):
+    year_matches = re.findall(r'(?<!\d)20\d{2}(?!\d)', pdf_url)
+    if year_matches:
+        return any(int(y) >= 2020 for y in year_matches)
+    return True
+
+def download_and_parse_pdf(pdf_url, state, doc_dict):
+    """Scarica il PDF, calcola l'hash, estrae il testo in RAM e salva un file .md."""
+    if pdf_url in state["pdfs"]:
         return
-    global_visited.add(url)
-    
-    print(f"   ➔ [{depth}/{max_depth}] [PDF] ↓ {url} (Trovato in: {source_page})")
-    
+
     try:
-        async with session.get(url) as response:
-            if response.status == 200:
-                pdf_bytes = await response.read()
-                
-                if not pdf_bytes.startswith(b'%PDF'):
-                    print(f"   ➔ [{depth}/{max_depth}] [!] Ignorato falso PDF: {url}")
-                    return
-                    
-                reader = PdfReader(io.BytesIO(pdf_bytes))
-                
-                text = "\n\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-                
-                if len(text.strip()) > 50:
-                    filename = generate_safe_filename(url, is_pdf=True)
-                    save_path = os.path.join(PDFS_DIR, filename)
-                    
-                    with open(save_path, "w", encoding="utf-8") as f:
-                        f.write(f"---\nsource: {url}\nfound_in: {source_page}\ntype: pdf\n---\n\n")
-                        f.write(text)
-    except Exception as e:
-        print(f"   ➔ [{depth}/{max_depth}] [!] Errore PDF {url}: {e}")
-
-async def process_site(crawler, session, site, global_visited):
-    base_url = site["url"]
-    max_depth = site["max_depth"]
-    base_domain = get_domain(base_url)
-    
-    current_level_urls = [base_url]
-    valid_professors = set()
-    
-    js_cleanup = """
-    const selectors = [
-        '#off-rubrica', '#off-search', '#off-language', '#off-servizi-on-line', '#off-profili',
-        '#menu-bar', '#box-agenda',
-        '.homeBox', '#logo-footer',
-        '.modal', '#blueimp-gallery', '.blueimp-gallery', '.blueimp-gallery-controls',
-        '.carousel-control', '.carousel-indicators', '.control-box', '#go_down', '#pause', '#resize',
-        '#scrollUp_div', '.fc-toolbar', '.fc-header-toolbar', '#scrollUp',
-        '#cookie-bar', '#unisa-utilities-bar', '.bg-footer', '.sub-footer'
-    ].join(', ');
-    document.querySelectorAll(selectors).forEach(el => { if(el) el.remove(); });
-    """
-
-    config = CrawlerRunConfig(
-        cache_mode=CacheMode.BYPASS,
-        word_count_threshold=0,
-        exclude_external_links=True,
-        excluded_tags=['nav', 'footer', 'header', 'aside', 'form', 'noscript'],
-        js_code=[js_cleanup] 
-    )
-
-    print(f"\n🔍 [0/{max_depth}] Esploro: {base_url} (Profondità: {max_depth})")
-
-    for depth in range(max_depth + 1):
-        urls_to_crawl = list(set([u for u in current_level_urls if u not in global_visited]))
-        
-        if not urls_to_crawl:
-            break
+        res = requests.get(pdf_url, timeout=10)
+        if res.status_code == 200 and 'application/pdf' in res.headers.get('Content-Type', '').lower():
             
-        print(f"   ➔ [{depth}/{max_depth}] Livello {depth}: elaborazione parallela di {len(urls_to_crawl)} URL...")
-        
-        for u in urls_to_crawl:
-            global_visited.add(u)
+            # 1. Filtro Anno
+            if not is_recent_pdf(pdf_url, res.headers):
+                return
 
-        # Crawling parallelo delle pagine web
-        results = await crawler.arun_many(urls=urls_to_crawl, config=config)
-        
-        next_level_urls = set()
-        pdf_urls_to_process = set()
-        
-        for result in results:
-            if not result.success:
-                continue
+            # 2. Check Hash del binario
+            file_hash = hashlib.md5(res.content).hexdigest()
+            old_info = state["pdfs"].get(pdf_url)
 
-            if "docenti.unisa.it" in result.url and result.url.rstrip("/") != "https://docenti.unisa.it":
-                # Estraiamo l'ID del professore dall'URL (es. '005501')
-                prof_match = re.search(r'docenti\.unisa\.it/([^/]+)', result.url)
-                if prof_match:
-                    prof_id = prof_match.group(1)
-                    
-                    # Se siamo sulla homepage del docente, valutiamo a quale dipartimento appartiene
-                    if result.url.endswith(f"/{prof_id}") or result.url.endswith(f"/{prof_id}/") or "/home" in result.url:
-                        html_lower = (result.html or "").lower()
-                        is_diem = "diem" in html_lower or "informazione ed elettrica" in html_lower
-                        
-                        if is_diem:
-                            valid_professors.add(prof_id) # Promosso! È del DIEM
-                        else:
-                            print(f"   ➔ [{depth}/{max_depth}] [SKIPPED] Docente non DIEM: {result.url}")
-                            continue
-                    else:
-                        # Se è una sottopagina (come /pubblicazioni o /didattica)
-                        # passa SOLO se il professore è già stato promosso sulla home
-                        if prof_id not in valid_professors:
-                            continue
+            if old_info and old_info["hash"] == file_hash:
+                return
+
+            existing_hashes = [info["hash"] for info in state["pdfs"].values() if info.get("hash")]
+            if file_hash in existing_hashes and not old_info:
+                state["pdfs"][pdf_url] = {"hash": file_hash, "filename": "DUPLICATO_CONTENUTO"}
+                print(f"  [DEDUPLICAZIONE] Contenuto PDF già presente, salto: {pdf_url}")
+                return
+
+            if old_info and old_info["hash"] != file_hash and old_info.get("filename"):
+                old_filepath = os.path.join(PDF_MD_DIR, old_info["filename"])
+                if os.path.exists(old_filepath) and old_info["filename"] != "DUPLICATO_CONTENUTO":
+                    os.remove(old_filepath)
+                    print(f"  [UPDATE] Vecchio Markdown PDF eliminato.")
+
+            # --- 3. PARSING IN RAM ---
+            if not res.content.startswith(b'%PDF'):
+                print(f"  [!] Falso PDF ignorato: {pdf_url}")
+                return
+                
+            reader = PdfReader(io.BytesIO(res.content))
+            extracted_text = "\n\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
             
-            md_content = result.markdown
-            
-            if md_content:
-                cleaned_text = clean_md(md_content)
-
-                if len(cleaned_text) > 10:
-                    filename = generate_safe_filename(result.url, is_pdf=False)
-                    save_path = os.path.join(PAGES_DIR, filename)
-                    
-                    with open(save_path, "w", encoding="utf-8") as f:
-                        f.write(f"---\nsource: {result.url}\ntype: webpage\n---\n\n")
-                        f.write(cleaned_text)
-                else:
-                    print(f"   ➔ [{depth}/{max_depth}] [SKIPPED] Testo troppo corto ({len(cleaned_text)} char): {result.url}")
+            if len(extracted_text.strip()) > 50:
+                filename = f"pdf_{file_hash[:10]}.md"
+                filepath = os.path.join(PDF_MD_DIR, filename)
+                
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(f"---\nsource: \"{pdf_url}\"\ntype: \"pdf\"\n---\n\n")
+                    f.write(extracted_text)
+                
+                doc = Document(page_content=extracted_text, metadata={"source": pdf_url, "type": "pdf"})
+                doc_dict[pdf_url] = doc
+                
+                state["pdfs"][pdf_url] = {"hash": file_hash, "filename": filename}
+                print(f"  [PDF->MD] {'AGGIORNATO' if old_info else 'NUOVO PARSING'}: {filename}")
             else:
-                print(f"   ➔ [{depth}/{max_depth}] [SKIPPED] Markdown vuoto: {result.url}")
+                print(f"  [PDF] Testo illeggibile o documento scansionato, ignorato: {pdf_url}")
                 
-            
-            if depth < max_depth:
-                internal_links = result.links.get("internal", [])
-                external_links = result.links.get("external", [])
-                all_links = internal_links + external_links
-                
-                for link_obj in all_links:
-                    href = link_obj.get("href")
-                    if href:
-                        absolute_url = urljoin(result.url, href).split("#")[0] 
-                        
-                        if ".pdf" in absolute_url.lower():
-                            pdf_urls_to_process.add((absolute_url, result.url))
-                        else:
-                            if absolute_url.startswith(base_url):
-                                next_level_urls.add(absolute_url)
-        
-        if pdf_urls_to_process:
-            print(f"   ➔ [{depth}/{max_depth}] Trovati {len(pdf_urls_to_process)} PDF. Download e parsing in corso...")
-            pdf_tasks = [process_pdf(pdf_url, session, global_visited, source_page, depth, max_depth) for pdf_url, source_page in pdf_urls_to_process]
-            await asyncio.gather(*pdf_tasks)
+    except Exception as e:
+        print(f"  [!] Errore parsing PDF: {e}")
 
-        current_level_urls = list(next_level_urls)
+def extract_links_and_pdfs(html, current_url, start_url):
+    soup = BeautifulSoup(html, "html.parser")
+    links_to_visit = []
+    pdfs_to_download = []
+    allowed_domain = urlparse(start_url).netloc  
+    
+    for a in soup.find_all('a', href=True):
+        href = a['href']
+        if not href.startswith(('http', '/', '#')):
+            href = '/' + href
+
+        full_url = urljoin(current_url, href).split('#')[0]
+        link_domain = urlparse(full_url).netloc
+        
+        if full_url.lower().endswith('.pdf') or '/pdf/' in full_url.lower():
+            if link_domain == allowed_domain:
+                pdfs_to_download.append(full_url)
+                
+        elif full_url.startswith(start_url):
+            if allowed_domain == "docenti.unisa.it":
+                path_parts = [p for p in urlparse(full_url).path.split('/') if p]
+                if path_parts:
+                    prof_id_or_name = path_parts[0]
+                    if '.' in prof_id_or_name:
+                        continue 
+            
+            if not any(full_url.lower().endswith(ext) for ext in ['.css', '.js', '.png', '.jpg', '.jpeg']):
+                if '/en/' not in full_url and not full_url.endswith('/en'):
+                    links_to_visit.append(full_url)
+                
+    return list(set(links_to_visit)), list(set(pdfs_to_download))
+
+async def crawl_task(task, crawler, state, doc_dict):
+    name = task["name"]
+    start_urls = task["urls"]
+    max_depth = task["depth"]
+    use_filter = task["filter"]
+
+    print(f"\n{'='*20} INIZIO TASK: {name} {'='*20}")
+    visited = set()
+
+    for start_url in start_urls:
+        print(f"\n>>> Analisi per: {start_url}")
+        current_queue = [start_url]
+        visited.add(start_url)
+
+        for depth in range(max_depth + 1):
+            if not current_queue:
+                break
+
+            print(f"\n  [Depth {depth}/{max_depth}] Crawling {len(current_queue)} URL in parallelo...")
+
+            js_cleanup = """
+            const selectors = [
+                '#off-rubrica', '#off-search', '#off-language', '#off-servizi-on-line', '#off-profili',
+                '#menu-bar', '#box-agenda',
+                '.homeBox', '#logo-footer',
+                '.modal', '#blueimp-gallery', '.blueimp-gallery', '.blueimp-gallery-controls',
+                '.carousel-control', '.carousel-indicators', '.control-box', '#go_down', '#pause', '#resize',
+                '#scrollUp_div', '.fc-toolbar', '.fc-header-toolbar', '#scrollUp',
+                '#cookie-bar', '#unisa-utilities-bar', '.bg-footer', '.sub-footer'
+            ].join(', ');
+            document.querySelectorAll(selectors).forEach(el => { if(el) el.remove(); });
+            """
+
+            results = await crawler.arun_many(
+                urls=current_queue,
+                config=CrawlerRunConfig(
+                    cache_mode=CacheMode.BYPASS,
+                    word_count_threshold=0,
+                    excluded_tags=['nav', 'footer', 'header', 'aside', 'form', 'noscript'],
+                    js_code=[js_cleanup] 
+                    ),
+                max_concurrent=10
+            )
+
+            next_queue = []
+
+            for result in results:
+                if not result.success:
+                    continue
+
+                # --- 1. PULIZIA DEL MARKDOWN ---
+                cleaned_markdown = clean_md(result.markdown)
+                
+                # Usiamo il testo pulito per tutti i calcoli successivi
+                page_hash = hashlib.md5(cleaned_markdown.encode('utf-8')).hexdigest()
+                old_hash = state["web"].get(result.url)
+                content_changed = (old_hash != page_hash)
+                
+                # --- 2. VALUTAZIONE FILTRO ---
+                page_is_relevant = True
+                should_explore = True
+                
+                if use_filter:
+                    if depth == 0:
+                        page_is_relevant = is_relevant(cleaned_markdown, result.url)
+                    elif depth == 1:
+                        page_is_relevant = is_relevant(cleaned_markdown, result.url)
+                        if not page_is_relevant:
+                            should_explore = False 
+                    else:
+                        page_is_relevant = True
+
+                # --- 3. SALVATAGGIO ---
+                if page_is_relevant:
+                    if not content_changed:
+                        print(f"  [CACHE] Invariato, salto salvataggio: {result.url}")
+                    else:
+                        if len(cleaned_markdown) > 10:
+                            doc = Document(page_content=cleaned_markdown, metadata={"source": result.url, "type": "web"})
+                            doc_dict[result.url] = doc
+                            
+                            url_hash_name = hashlib.md5(result.url.encode()).hexdigest()[:10]
+                            nome_file = os.path.join(PAGES_DIR, f"page_{url_hash_name}.md")
+                            
+                            with open(nome_file, "w", encoding="utf-8") as f:
+                                f.write(f"---\nsource: \"{result.url}\"\ntype: \"webpage\"\n---\n\n{cleaned_markdown}")
+                            
+                            state["web"][result.url] = page_hash
+                            print(f"  [MD] {'AGGIORNATO' if old_hash else 'NUOVO'}: {result.url}")
+                        else:
+                            print(f"  [SKIPPED] Testo troppo corto dopo la pulizia: {result.url}")
+
+                # --- 4. ESTRAZIONE LINK ---
+                if depth < max_depth and should_explore:
+                    new_links, pdfs = extract_links_and_pdfs(result.html, result.url, start_url)
+
+                    for pdf_url in pdfs:
+                        download_and_parse_pdf(pdf_url, state, doc_dict)
+
+                    for link in new_links:
+                        if link not in visited:
+                            visited.add(link)
+                            next_queue.append(link)
+
+            current_queue = next_queue
 
 async def main():
-    print("🚀 Inizio il web crawling parallelo con Crawl4AI (Boilerplate rimosso)...\n")
+    state = load_state()
+    doc_dict = load_knowledge_base()
+
+    SEARCH_TASKS = [
+        {"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 3, "filter": False},
+        {"name": "Docenti", "urls": ["https://docenti.unisa.it/"], "depth": 2, "filter": True},
+        {"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 3, "filter": False}
+    ]
+
+    async with AsyncWebCrawler(verbose=False) as crawler:
+        for task in SEARCH_TASKS:
+            await crawl_task(task, crawler, state, doc_dict)
+
+    print(f"\nCompilazione Knowledge Base finale in corso...")
     
-    browser_config = BrowserConfig(
-        headless=True,
-        text_mode=True
-    )
+    knowledge_base = list(doc_dict.values())
     
-    global_visited = set()
-    
-    async with aiohttp.ClientSession() as session:
-        async with AsyncWebCrawler(config=browser_config) as crawler:
-            for site in TARGET_SITES:
-                await process_site(crawler, session, site, global_visited)
-            
-    print("\n✅ Crawling completato!")
-    print(f"📄 Pagine (pulite) salvate in: {PAGES_DIR}")
-    print(f"📕 Testo dei PDF salvato in: {PDFS_DIR}")
+    with open(KB_FILE, "wb") as f:
+        pickle.dump(knowledge_base, f)
+        
+    save_state(state)
+
+    pdf_files_count = len(state["pdfs"])
+    web_files_count = len(state["web"])
+
+    print(f"\n{'='*12} RESOCONTO FINALE {'='*12}")
+    print(f"🌍 Pagine Web uniche tracciate: {web_files_count}")
+    print(f"📁 Documenti PDF unici tracciati (convertiti): {pdf_files_count}")
+    print(f"🧠 Totale 'Documenti' salvati nella Knowledge Base: {len(knowledge_base)}")
+    print(f"{'='*40}")
+    print("Stato incrementale salvato. Al prossimo avvio verificherò solo le variazioni!")
 
 if __name__ == "__main__":
     asyncio.run(main())
