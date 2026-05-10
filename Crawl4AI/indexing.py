@@ -28,9 +28,10 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain.retrievers import ParentDocumentRetriever
-from langchain.storage import LocalFileStore, create_kv_docstore
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_classic.retrievers.parent_document_retriever import ParentDocumentRetriever
+from langchain_classic.storage import LocalFileStore, create_kv_docstore
+from langchain_text_splitters.character import RecursiveCharacterTextSplitter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- CONFIGURAZIONE ---
 CHUNKS_DIR = "chunks"
@@ -40,8 +41,8 @@ os.makedirs(VS_DIR, exist_ok=True)
 
 OLLAMA_MODEL = "llama3.1"   # modello locale via Ollama
 N_QUESTIONS = 3             # domande ipotetiche per chunk
-MIN_CHUNK_LEN = 100         # chunk troppo corti vengono saltati
-BATCH_SLEEP = 0.3           # pausa ogni 50 chunk (Ollama è locale, può essere bassa)
+MIN_CHUNK_LEN = 300         # chunk troppo corti vengono saltati
+BATCH_SLEEP = 0.0           # pausa ogni 50 chunk (Ollama è locale, può essere bassa)
 
 # Dimensioni chunking PDF
 PDF_CHILD_SIZE = 400
@@ -125,7 +126,14 @@ def build_pdf_retriever(
     )
 
     print(f"[PDF] Indicizzazione {len(pdf_docs)} documenti con ParentDocumentRetriever...")
-    retriever.add_documents(pdf_docs)
+    
+    # Inserimento a blocchi (batching) per evitare il limite di 5461 di Chroma
+    batch_size = 20  # Numero di Parent docs per batch. Modifica se necessario.
+    for i in range(0, len(pdf_docs), batch_size):
+        batch = pdf_docs[i : i + batch_size]
+        print(f"  [PDF] Aggiunta batch {i//batch_size + 1} (da {i} a {i + len(batch) - 1})...")
+        retriever.add_documents(batch)
+        
     print("[PDF] Indicizzazione completata.")
     return retriever
 
@@ -221,7 +229,55 @@ def main():
     chain = HYP_PROMPT | llm | StrOutputParser()
 
     print(f"\n[HYP] Generazione domande ({N_QUESTIONS} per chunk) con {OLLAMA_MODEL}...")
-    hyp_docs, updated = generate_hypothetical_questions(web_chunks, existing, chain)
+    
+    # --- NUOVA GESTIONE MULTITHREADING ---
+    hyp_docs = []
+    updated = dict(existing)
+    
+    # Filtriamo prima i chunk da elaborare per non sprecare thread
+    chunks_to_process = []
+    for chunk in web_chunks:
+        content = chunk.page_content.strip()
+        chunk_id = chunk.metadata.get("source", "") + "::" + content[:80]
+        
+        if chunk_id in existing:
+            for q in existing[chunk_id]:
+                hyp_docs.append(Document(page_content=q, metadata={**chunk.metadata, "original_content": content}))
+        elif len(content) >= MIN_CHUNK_LEN:
+            chunks_to_process.append((chunk_id, content, chunk))
+
+    print(f"  [HYP] {len(chunks_to_process)} nuovi chunk da far elaborare al LLM.")
+
+    def process_single_chunk(data):
+        c_id, text, orig_chunk = data
+        try:
+            out = chain.invoke({"chunk": text, "n": N_QUESTIONS})
+            if "NO_OUTPUT" in out:
+                return c_id, [], orig_chunk, text
+            
+            qs = [q.strip() for q in out.strip().split("\n") if q.strip() and len(q.strip()) > 10][:N_QUESTIONS]
+            return c_id, qs, orig_chunk, text
+        except Exception as e:
+            return c_id, None, orig_chunk, text
+
+    # Usiamo 4 "lavoratori" in parallelo (se hai una GPU potente puoi salire a 8)
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(process_single_chunk, item): item for item in chunks_to_process}
+        
+        completed = 0
+        for future in as_completed(futures):
+            c_id, qs, orig_chunk, text = future.result()
+            completed += 1
+            
+            if qs is not None:
+                updated[c_id] = qs
+                for q in qs:
+                    hyp_docs.append(Document(page_content=q, metadata={**orig_chunk.metadata, "original_content": text}))
+            
+            if completed % 20 == 0:
+                print(f"  [HYP] {completed}/{len(chunks_to_process)} elaborati in parallelo...")
+
+    # -------------------------------------
 
     with open(HYP_FILE, "w", encoding="utf-8") as f:
         json.dump(updated, f, ensure_ascii=False, indent=2)

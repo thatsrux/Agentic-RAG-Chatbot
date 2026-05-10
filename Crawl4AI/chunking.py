@@ -14,9 +14,8 @@ Output: chunks/chunks_web.pkl, chunks/pdf_docs.pkl
 import pickle
 import os
 from langchain_core.documents import Document
-from langchain.text_splitter import (
-    MarkdownTextSplitter,
-    RecursiveCharacterTextSplitter,
+from langchain_text_splitters.markdown import (
+    MarkdownTextSplitter
 )
 
 # --- CONFIGURAZIONE ---

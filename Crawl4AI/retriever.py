@@ -15,9 +15,9 @@ from langchain_core.documents import Document
 from langchain_community.vectorstores import FAISS
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain.retrievers import ParentDocumentRetriever
-from langchain.storage import LocalFileStore, create_kv_docstore
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_classic.retrievers.parent_document_retriever import ParentDocumentRetriever
+from langchain_classic.storage import LocalFileStore, create_kv_docstore
+from langchain_text_splitters.character import RecursiveCharacterTextSplitter
 from sentence_transformers import CrossEncoder
 
 # --- CONFIGURAZIONE ---
