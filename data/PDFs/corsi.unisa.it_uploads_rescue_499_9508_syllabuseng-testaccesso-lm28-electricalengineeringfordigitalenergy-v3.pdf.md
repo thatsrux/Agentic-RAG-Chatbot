@@ -1,9 +1,0 @@
----
-source: https://corsi.unisa.it/uploads/rescue/499/9508/syllabuseng-testaccesso-lm28-electricalengineeringfordigitalenergy-v3.pdf
-found_in: https://corsi.unisa.it/electrical-engineering-for-digital-energy/immatricolazioni
-type: pdf
----
-
-Università degli Studi di Salerno Dipartimento di Ingegneria dell'Informazione  ed Elettrica e Matematica Applicata  
-1  
- SYLLABUS FOR THE ADMISSION TEST TO BE ADMITTED TO THE  MASTER’S DEGREE IN ELECTRICAL ENGINEERING FOR DIGITAL ENERGY ACADEMIC YEAR 2023/2024   Basic disciplines.  MATHEMATICS – functions and differential calculus (one or more real variables). Vectors in the plane and in the Euclidean space; vector fields. Linear systems. Integral calculus. Complex numbers. Matrix algebra. Eigenvalues and eigenvectors. Complex calculus.  PHYSICS – kinematics. Dynamic of point-mass and systems of particles. Work and energy. Rigid body dynamics. Gravity. Electric fields. Electric current and circuits. Magnetic fields. Electromagnetism (induction).  Characterizing and Engineering disciplines.  ELECTRICAL ENGINEERING – Methods related to the study of linear time invariant circuits in the time and frequency domains. Analysis of static circuits and first order dynamic circuits. Analysis of simple filters. Phasor and power analysis of linear circuit operating in AC.  Principle of electrical measurement.    COMPUTER ENGINEERING – Fundamentals of structured programming - Basic data structures: vectors, matrices, structures, - Sorting and searching algorithms. Fundamental data structures: stack, queues, list. - Architecture of a computer: CPU, memory, I/O devices. – Structure of an operating system.  
