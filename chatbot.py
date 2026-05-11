@@ -10,8 +10,8 @@ from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from retriever import HybridRetriever
+from tools import *
 
-# --- CONFIGURAZIONE ---
 OLLAMA_MODEL = "llama3.2" 
 
 SYSTEM_PROMPT = """
@@ -115,28 +115,40 @@ def main():
 
         # Risposta assistente
         with st.chat_message("assistant"):
-            # 1. Retrieval
-            with st.spinner("Consultazione documenti..."):
-                docs = st.session_state.retriever.retrieve(user_input)
-                context = format_context(docs)
-                sources_list = list(set([d.metadata.get("source", "N/A") for d in docs]))
             
-            # 2. Generazione con Streaming
+            # --- QUERY REWRITING & MULTI-QUERY ---
+            with st.spinner("Ottimizzazione della domanda..."):
+                optimized_query = rewrite_query_tool.invoke({"query": user_input})
+                st.caption(f"🔧 *Query ottimizzata:* {optimized_query}")
+                
+                query_variations = multi_query_tool.invoke({"query": optimized_query, "n": 2})
+                st.caption(f"🌿 *Varianti generate:* {', '.join(query_variations)}")
+
+            with st.spinner("Consultazione documenti..."):
+                all_queries = [optimized_query] + query_variations
+                docs = []
+                
+                for q in all_queries:
+                    docs.extend(st.session_state.retriever.retrieve(q))
+                
+                unique_docs = {doc.page_content: doc for doc in docs}.values()
+                
+                context = format_context(unique_docs)
+                sources_list = list(set([d.metadata.get("source", "N/A") for d in unique_docs]))
+            
+            # --- FASE 3: GENERAZIONE CON STREAMING ---
             with st.spinner("Generazione risposta..."):
                 chain = RAG_PROMPT | llm | StrOutputParser()
                 
                 response_placeholder = st.empty()
                 full_response = ""
                 
-                # Streaming della risposta parola per parola
                 for chunk in chain.stream({"context": context, "question": user_input}):
                     full_response += chunk
                     response_placeholder.markdown(full_response + "▌")
                 
-                # Risposta definitiva senza cursore
                 response_placeholder.markdown(full_response)
                 
-                # Mostra fonti se abilitato
                 if show_sources and sources_list:
                     with st.expander("📄 Fonti consultate"):
                         for src in sources_list:
