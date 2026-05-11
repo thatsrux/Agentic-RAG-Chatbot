@@ -36,7 +36,7 @@ def load_llm():
     return ChatOllama(
         model=OLLAMA_MODEL, 
         temperature=0.1,
-        num_ctx=2048 # Dà a Ollama più respiro per la memoria del contesto
+        num_ctx=2048 
     )
 
 # --- FUNZIONI DI SUPPORTO ---
