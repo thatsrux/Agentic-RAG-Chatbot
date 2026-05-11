@@ -1,9 +1,9 @@
+#general
+__pycache__/
+
 # Ignore documents
 *.pdf
 *.md
-*.txt
-*.json
-markdown_estratti/
 
 # Ignore serialized / binary files
 *.pickle
@@ -13,3 +13,4 @@ markdown_estratti/
 # Ignore database files
 *.sqlite3
 vectorstores/
+data/
