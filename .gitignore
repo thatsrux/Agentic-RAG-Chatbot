@@ -4,6 +4,7 @@ __pycache__/
 # Ignore documents
 *.pdf
 *.md
+log.txt
 
 # Ignore serialized / binary files
 *.pickle
