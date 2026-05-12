@@ -13,6 +13,15 @@ from retriever import HybridRetriever
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
+SYSTEM_PROMPT = """
+Sei DIEMbot, l'assistente virtuale del DIEM (Dipartimento di Ingegneria dell'Informazione ed Elettrica e Matematica applicata) dell'Università di Salerno.
+
+REGOLE FONDAMENTALI:
+1. Rispondi in italiano in modo professionale e cordiale.
+2. Basati ESCLUSIVAMENTE sui documenti forniti nel "Contesto".
+3. Se l'informazione non è presente nei documenti, rispondi onestamente che non disponi di quei dati. Non inventare nulla.
+4. NON inserire link o URL nel corpo della risposta (verranno visualizzati separatamente).
+"""
 
 @st.cache_resource(show_spinner=False)
 def load_presidio():
@@ -60,6 +69,7 @@ class AgentState(TypedDict):
     safe_question: str     # Domanda dopo il filtro PII
     optimized_query: str   # Domanda riscritta per il database
     documents: List[str]   # Documenti recuperati dal Vector Store
+    sources: List[str]     # Fonti estratte dai documenti
     generation: str        # Risposta generata dall'LLM
     loop_count: int        # Contatore per evitare loop infiniti
 
@@ -123,48 +133,43 @@ def rewrite_query_node(state: AgentState):
     return {"optimized_query": optimized}
 
 def retrieve_node(state: AgentState):
-    """Nodo 3: Cerca i documenti VERI nel database FAISS/Chroma."""
+    """Nodo 3: Cerca i documenti e popola la lista delle fonti."""
     query = state["optimized_query"]
     
-    # 1. Chiamiamo il tuo vero Retriever
+    # 1. Chiamiamo il tuo retriever
     raw_docs = st.session_state.retriever.retrieve(query)
     
-    # 2. Estraiamo il testo e le fonti per l'LLM
     doc_texts = []
+    sources_list = []
+    
+    # 2. Iteriamo sui documenti estratti
     for doc in raw_docs:
         fonte = doc.metadata.get("source", "Fonte sconosciuta")
         doc_texts.append(f"[Fonte: {fonte}]\n{doc.page_content}")
+        sources_list.append(fonte) # Raccogliamo il link/nome del file
         
-    # 3. Gestione caso "Nessun documento"
+    # 3. Gestione caso vuoto
     if not doc_texts:
-        doc_texts = ["Nessuna informazione utile trovata nel database ufficiale del DIEM per questa query."]
+        doc_texts = ["Nessuna informazione utile trovata."]
         
-    # (Opzionale) Stampa di debug per farti vedere cosa estrae!
-    print(f"[DEBUG RETRIEVER] Estratti {len(raw_docs)} documenti per la query: '{query}'")
+    # 4. Rimuoviamo i duplicati dalle fonti
+    unique_sources = list(set(sources_list))
     
-    return {"documents": doc_texts}
+    print(f"[DEBUG RETRIEVER] Estratti {len(raw_docs)} documenti. Fonti: {unique_sources}")
+    
+    # IMPORTANTE: Restituiamo sia i documenti che le fonti
+    return {"documents": doc_texts, "sources": unique_sources}
 
 
 def generate_node(state: AgentState):
-    """Nodo 4: Genera la risposta usando i documenti."""
     llm = load_llm()
-    
-    # Prompt ottimizzato per risposte dirette e zero chiacchiere
-    prompt = ChatPromptTemplate.from_template(
-        "Sei l'assistente virtuale del DIEM. Rispondi alla seguente domanda basandoti ESCLUSIVAMENTE sui documenti forniti.\n\n"
-        "--- INIZIO DOCUMENTI ---\n"
-        "{docs}\n"
-        "--- FINE DOCUMENTI ---\n\n"
-        "Domanda: {question}\n\n"
-        "REGOLE FONDAMENTALI DI STILE:\n"
-        "1. RISPONDI DIRETTAMENTE: Non usare MAI formule di saluto (es. 'Ciao'), non presentarti (es. 'Sono l'assistente...') e non fare premesse (es. 'Per rispondere alla tua domanda...').\n"
-        "2. Vai dritto al punto fornendo subito l'informazione richiesta in modo discorsivo ma conciso.\n"
-        "3. Se l'informazione non è presente nei documenti, rispondi SOLO: 'Non ho trovato questa informazione nei documenti ufficiali.' Non inventare nulla.\n"
-        "4. Aggiungi sempre la fonte alla fine della risposta."
-    )
+    # Organizzato come richiesto con SYSTEM e HUMAN message
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", SYSTEM_PROMPT),
+        ("human", "Contesto estratto dai documenti:\n{docs}\n\nDomanda dell'utente: {question}")
+    ])
     
     docs_string = "\n\n---\n\n".join(state["documents"])
-    
     chain = prompt | llm | StrOutputParser()
     response = chain.invoke({"question": state["safe_question"], "docs": docs_string})
     
@@ -252,34 +257,77 @@ def main():
         with st.spinner("Caricamento del database della conoscenza..."):
             st.session_state.retriever = HybridRetriever()
             
+    # --- 1. GESTIONE CRONOLOGIA CHAT ---
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
+    # --- 2. SIDEBAR CON OPZIONE CANCELLA CRONOLOGIA ---
+    with st.sidebar:
+        st.header("Impostazioni")
+        if st.button("🗑️ Cancella cronologia chat", use_container_width=True):
+            st.session_state.messages = []
+            st.rerun() 
+        
+        st.divider()
+        st.caption("Configurazione: LangGraph + Ollama (Llama 3.2)")
+
+    # --- 3. COSTRUZIONE GRAFO ---
     app = build_agentic_rag()
     
+    # Visualizzazione messaggi precedenti (Cronologia semplice, senza rieseguire la chain)
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+            if msg["role"] == "assistant" and msg.get("sources"):
+                with st.expander("📚 Fonti", expanded=False):
+                    for src in msg["sources"]:
+                        st.caption(f"• {src}")
             
+    # --- 4. GESTIONE NUOVO INPUT UTENTE ---
     user_input = st.chat_input("Chiedimi qualcosa...")
+    
     if user_input:
-        st.chat_message("user").markdown(user_input)
-        
+        # Mostra messaggio utente
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        with st.chat_message("user"):
+            st.markdown(user_input)
+            
+        # Generazione della risposta dell'assistente
         with st.chat_message("assistant"):
-            with st.spinner("L'Agente sta ragionando..."):
-                # Eseguiamo il grafo passandogli lo stato iniziale
+            final_answer = "Errore nella generazione."
+            final_sources = []
+            
+            # CONTENITORE: L'esecuzione della pipeline (Agentic Chain)
+            with st.expander("⚙️ Agentic Chain", expanded=False):
+                # Prepariamo gli input per il grafo
                 inputs = {"question": user_input, "loop_count": 0}
                 
-                # Usiamo stream() per vedere i passaggi (opzionale ma fantastico per il debug)
+                # Esecuzione del grafo in streaming
                 for output in app.stream(inputs):
                     for key, value in output.items():
-                        # Mostra a schermo in quale nodo si trova
-                        st.caption(f"⚙️ Esecuzione nodo: **{key}**")
+                        st.caption(f"Passaggio completato: **{key}**")
                         
-                # Recuperiamo l'output finale dal nodo ethical_guardrail
-                final_answer = value.get("generation", "Errore nella generazione.")
-                
-                st.markdown(final_answer)
+                        # Aggiorniamo i dati man mano che i nodi producono output
+                        if "generation" in value:
+                            final_answer = value["generation"]
+                        if "sources" in value:
+                            final_sources = value["sources"]
+            
+            # Visualizzazione risposta finale
+            st.markdown(final_answer)
+            
+            # Visualizzazione fonti finale
+            if final_sources:
+                with st.expander("📚 Fonti", expanded=False):
+                    for src in final_sources:
+                        st.caption(f"• {src}")
+                        
+        # Salvataggio nella cronologia
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": final_answer,
+            "sources": final_sources
+        })
 
 if __name__ == "__main__":
     main()
