@@ -29,3 +29,10 @@ crawl4ai>=0.8.0
 beautifulsoup4>=4.12.0
 pypdf>=4.0.0
 requests>=2.32.0
+
+
+presidio_analyzer
+langchain_experimental
+langgraph
+presidio-anonymizer
+Faker

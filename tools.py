@@ -41,7 +41,6 @@ def multi_query_tool(query: str, n: int = 3) -> list[str]:
     """
     llm = get_tool_llm()
     
-    # Prompt basato sulla slide "Implementation - Multi-Query"
     prompt = PromptTemplate.from_template(
         "Sei un ottimizzatore di query di ricerca. "
         "Genera {n} diverse riformulazioni della seguente domanda, "
