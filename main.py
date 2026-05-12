@@ -58,9 +58,11 @@ def load_anonymizer():
         }
     )
 
+CURRENT_MODEL = "mistral-nemo"
+CURRENT_MODEL = "llama3.2"
 @st.cache_resource(show_spinner=False)
 def load_llm():
-    return ChatOllama(model="llama3.2", temperature=0.1)
+    return ChatOllama(model=CURRENT_MODEL, temperature=0.1)
 
 # --- 1. DEFINIZIONE DELLO STATO (La "Memoria" dell'Agente) ---
 # Questo dizionario viaggerà da un nodo all'altro, accumulando dati.
@@ -115,8 +117,8 @@ def rewrite_query_node(state: AgentState):
     prompt = ChatPromptTemplate.from_template(
         "Prepara la domanda dell'utente per la ricerca nei documenti del dipartimento DIEM.\n\n"
         "REGOLE TASSATIVE:\n"
-        "1. LINGUAGGIO NATURALE: Mantieni sempre una frase discorsiva e di senso compiuto in italiano. È VIETATO ridurre la domanda a una lista di parole chiave (non fare 'nome cognome orari').\n"
-        "2. FEDELTÀ: Non storpiare le parole e non espandere le abbreviazioni in modo strano. Se la domanda è già chiara (es. 'Qual è l'orario del prof Vento?'), RICOPILA ESATTAMENTE COM'È.\n"
+        "1. LINGUAGGIO NATURALE: Mantieni sempre una frase di senso compiuto.\n"
+        "2. FEDELTÀ: Non storpiare le parole e non espandere le abbreviazioni in modo strano. NON TRADURRE I NOMI DEI CORSI SE PRESENTI NELLA QUERY. Se la domanda è già chiara, RICOPILA ESATTAMENTE COM'È.\n"
         "3. Rimuovi eventuali tag di privacy come <PHONE_NUMBER> o simili.\n"
         "4. Restituisci SOLO ed ESCLUSIVAMENTE la frase finale, senza alcun prefisso o spiegazione.\n\n"
         "Domanda: {question}"
@@ -196,7 +198,8 @@ def ethical_guardrail_node(state: AgentState):
 def check_relevance(state: AgentState) -> str:
     """Valuta se la risposta generata risponde effettivamente alla domanda."""
     # Limite di sicurezza: se abbiamo fatto 3 giri, ci fermiamo comunque
-    if state["loop_count"] >= 3:
+    if state["loop_count"] >= 5:
+        print(f"[DEBUG RELEVANCE] Raggiunto limite massimo di tentativi ({state['loop_count']}). Forzo uscita.")
         return "end"
 
     llm = load_llm()
@@ -205,11 +208,23 @@ def check_relevance(state: AgentState) -> str:
         "Rispondi SOLO 'SI' o 'NO'."
     )
     chain = prompt | llm | StrOutputParser()
-    eval_result = chain.invoke({"response": state["generation"], "question": state["safe_question"]}).strip().upper()
+
+    print(f"\n[DEBUG CHECKER] Sto valutando questa bozza:\n---")
+    print(state["generation"])
+    print("---\n")
     
-    if "SI" in eval_result:
+    # Esecuzione valutazione
+    eval_result = chain.invoke({
+        "response": state["generation"], 
+        "question": state["safe_question"]
+    }).strip().upper()
+    
+    print(f"[DEBUG RELEVANCE] Valutazione risposta: {eval_result} (Giro n. {state['loop_count']})")
+    
+    if "SI" in eval_result or "SÌ" in eval_result:
         return "relevant" # Va al guardrail finale
     else:
+        print(f"[DEBUG RELEVANCE] Risposta non pertinente. Re-instradamento verso rewrite_query...")
         return "not_relevant" # Torna a riscrivere la query
 
 
@@ -269,7 +284,7 @@ def main():
             st.rerun() 
         
         st.divider()
-        st.caption("Configurazione: LangGraph + Ollama (Llama 3.2)")
+        st.caption(f"Configurazione: LangGraph + ({CURRENT_MODEL})")
 
     # --- 3. COSTRUZIONE GRAFO ---
     app = build_agentic_rag()
