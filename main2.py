@@ -30,19 +30,25 @@ def get_retriever():
 
 # --- DEFINIZIONE TOOL ---
 @tool
-def search_diem_documents(testo_ricerca: str) -> str:
+def search_diem_documents(testo_ricerca: str, tipo_fonte: str = "all") -> str:
     """Usa questo strumento per cercare nei documenti ufficiali del DIEM.
-    Restituisce il contenuto e la fonte (URL o nome file).
+    MOLTO IMPORTANTE: Inserisci SOLO PAROLE CHIAVE essenziali.
+    
+    REGOLE PER IL PARAMETRO 'tipo_fonte':
+    - Usa "web" se l'utente chiede di: aule (es. Aula delle lauree, Aula 126), orari, contatti, docenti o informazioni di servizio.
+    - Usa "pdf" se l'utente chiede di: regolamenti, bandi, tesi, manifesti degli studi o burocrazia.
+    - Usa "all" in tutti gli altri casi o se la prima ricerca fallisce.
     """
     retriever = get_retriever()
-    raw_docs = retriever.retrieve(testo_ricerca)
+    
+    # Passiamo il filtro al retriever locale!
+    raw_docs = retriever.retrieve(testo_ricerca, tipo_fonte=tipo_fonte)
     
     if not raw_docs:
         return "Nessuna informazione trovata nei documenti ufficiali."
     
     results = []
     for doc in raw_docs:
-        # Assicurati che il retriever carichi l'URL nel campo 'source' dei metadati
         fonte = doc.metadata.get("source", "Fonte sconosciuta")
         results.append(f"[Fonte: {fonte}]\n{doc.page_content}")
     return "\n\n---\n\n".join(results)
@@ -54,10 +60,21 @@ class GraphState(TypedDict):
 def create_agent_node(tools):
     llm = get_llm()
     llm_with_tools = llm.bind_tools(tools)
-    sys_prompt = "Sei DIEMbot, assistente del DIEM. Usa 'search_diem_documents' per le info ufficiali."
+    
+    sys_prompt = """Sei DIEMbot, l'assistente virtuale del DIEM (Università di Salerno).
+Rispondi sempre in italiano professionale. 
+
+REGOLE PER L'USO DELLO STRUMENTO DI RICERCA:
+1. Cerca SOLO ed ESCLUSIVAMENTE l'argomento dell'ULTIMA domanda dell'utente.
+2. NON mescolare MAI argomenti o parole chiave di domande precedenti con quella attuale.
+3. Estrai solo 1 o 2 parole chiave."""
+    
     def agent(state):
-        full_messages = [SystemMessage(content=sys_prompt)] + state["messages"]
-        return {"messages": [llm_with_tools.invoke(full_messages)]}
+        messages = state["messages"]
+        full_messages = [SystemMessage(content=sys_prompt)] + messages
+        response = llm_with_tools.invoke(full_messages)
+        return {"messages": [response]}
+    
     return agent
 
 def create_rewrite_node():
@@ -94,11 +111,28 @@ Risultato: orari segreteria studenti""")
 def create_generate_node():
     llm = get_llm()
     def generate(state):
+        # Recupera l'ultimo contesto e l'ultima domanda
         context = next(msg.content for msg in reversed(state["messages"]) if isinstance(msg, ToolMessage))
         question = next(msg.content for msg in reversed(state["messages"]) if isinstance(msg, HumanMessage))
-        sys_msg = SystemMessage(content="Rispondi in italiano usando SOLO il contesto fornito. Parla in terza persona.")
-        user_msg = HumanMessage(content=f"CONTESTO: {context}\n\nDOMANDA: {question}")
+        
+        # SYSTEM PROMPT POTENZIATO
+        sys_prompt = """Sei DIEMbot, l'assistente virtuale istituzionale del DIEM (Università di Salerno).
+Il tuo compito è rispondere alle domande degli utenti basandoti ESCLUSIVAMENTE sul contesto fornito, in italiano corretto e professionale.
+
+REGOLE CRITICHE DI COMPORTAMENTO:
+1. PRIORITÀ INFORMATIVA PER LE AULE E STRUTTURE: Se la domanda riguarda un'aula, un laboratorio o un ufficio, cerca nel contesto le parole chiave "Ubicazione", "Piano", "Edificio" e "Capienza". La tua risposta DEVE contenere la posizione fisica esatta prima di ogni altra cosa. Ignora i link ai "Calendari Occupazione" a meno che l'utente non chieda specificamente gli orari.
+2. COMPLETEZZA UTILE: Se disponibili nel contesto, aggiungi dettagli come la capienza o le attrezzature presenti, rendendo la frase discorsiva.
+3. DIVIETO DI META-LINGUAGGIO: Non iniziare mai le frasi con "Nel contesto fornito...", "In base ai documenti..." o "Il testo dice...". Rispondi direttamente.
+4. GESTIONE LINK E URL: Non incollare mai URL grezzi o link Markdown nel testo della risposta. Il sistema gestisce le fonti separatamente.
+5. TERZA PERSONA: Riferisciti sempre a docenti, personale e strutture in terza persona.
+
+"""
+        
+        sys_msg = SystemMessage(content=sys_prompt)
+        user_msg = HumanMessage(content=f"CONTESTO:\n{context}\n\nDOMANDA: {question}")
+        
         return {"messages": [llm.invoke([sys_msg, user_msg])]}
+        
     return generate
 
 # --- GRADER E LOGICA GRAFO (Invariati) ---
@@ -106,48 +140,29 @@ class GradeDocuments(BaseModel):
     binary_score: str = Field(description="Rilevante? 'yes'/'no'")
 
 def create_grade_documents():
-    llm = get_llm()
-    structured_llm = llm.with_structured_output(GradeDocuments)
-    
     def grade_documents(state):
         last_msg = state["messages"][-1]
         
+        # 1. Sicurezza: Se non è un messaggio del tool, vai a generate
         if not isinstance(last_msg, ToolMessage): 
             return "generate"
             
-        # LOGICA DI SICUREZZA 1: Se il tool dice chiaramente che ha fallito, non serve il LLM per capirlo
+        # 2. Controllo testuale: Il database è vuoto?
         if "Nessuna informazione trovata" in last_msg.content:
+            st.session_state.last_grade = {
+                "score": "no", 
+                "reasoning": "Nessun documento trovato dal database vettoriale."
+            }
             return "rewrite"
             
-        question = next(msg.content for msg in reversed(state["messages"]) if isinstance(msg, HumanMessage))
+        # 3. Bypass LLM: Se il Tool ha trovato documenti, CI FIDIAMO DEL CROSS-ENCODER!
+        # Il Cross-Encoder in retriever.py è molto più bravo di Llama a valutare la pertinenza.
+        st.session_state.last_grade = {
+            "score": "yes", 
+            "reasoning": "Documenti trovati e validati dal Cross-Encoder."
+        }
+        return "generate"
         
-        # PROMPT SEMPLIFICATO PER MODELLI LOCALI
-        grade_prompt = f"""Devi valutare se il testo seguente contiene il nome o l'argomento richiesto.
-Domanda dell'utente: {question}
-
-Testo recuperato:
-{last_msg.content[:800]}
-
-Il Testo recuperato contiene informazioni per rispondere alla Domanda? Rispondi 'yes' oppure 'no'."""
-        
-        try:
-            grade = structured_llm.invoke([SystemMessage(content=grade_prompt)])
-            
-            st.session_state.last_grade = {
-                "score": grade.binary_score,
-                "reasoning": grade.reasoning
-            }
-            
-            # Se rileva 'yes' andiamo alla generazione
-            if "yes" in grade.binary_score.lower():
-                return "generate"
-            else:
-                return "rewrite"
-                
-        except Exception as e:
-            st.session_state.last_grade = {"score": "yes", "reasoning": "Fallback attivato per errore parsing Grader"}
-            return "generate"
-            
     return grade_documents
 
 @st.cache_resource(show_spinner=False)
