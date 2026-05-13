@@ -115,13 +115,15 @@ def rewrite_query_node(state: AgentState):
     llm = load_llm()
     
     prompt = ChatPromptTemplate.from_template(
-        "Prepara la domanda dell'utente per la ricerca nei documenti del dipartimento DIEM.\n\n"
+        "Sei un assistente che ottimizza le query degli utenti per un motore di ricerca documentale del dipartimento DIEM.\n\n"
         "REGOLE TASSATIVE:\n"
-        "1. LINGUAGGIO NATURALE: Mantieni sempre una frase di senso compiuto.\n"
-        "2. FEDELTÀ: Non storpiare le parole e non espandere le abbreviazioni in modo strano. NON TRADURRE I NOMI DEI CORSI SE PRESENTI NELLA QUERY. Se la domanda è già chiara, RICOPILA ESATTAMENTE COM'È.\n"
-        "3. Rimuovi eventuali tag di privacy come <PHONE_NUMBER> o simili.\n"
-        "4. Restituisci SOLO ed ESCLUSIVAMENTE la frase finale, senza alcun prefisso o spiegazione.\n\n"
-        "Domanda: {question}"
+        "1. OTTIMIZZAZIONE: Il tuo obiettivo è estrarre l'intento e le parole chiave. Non è necessario usare frasi grammaticalmente complete (evita articoli e preposizioni inutili se non servono).\n"
+        "2. CONSERVAZIONE: Se la domanda è già espressa in modo chiaro o a parole chiave, DEVI ricopiarla ESATTAMENTE com'è, senza aggiungere articoli (es. 'il', 'del', 'di').\n"
+        "3. DOMINIO: Limita il contesto a corsi, docenti, esami e attività del DIEM.\n"
+        "4. FEDELTÀ: Non tradurre i nomi dei corsi e non espandere abbreviazioni se non sei sicuro.\n"
+        "5. PRIVACY: Rimuovi eventuali tag come <PHONE_NUMBER>, <EMAIL_ADDRESS>.\n"
+        "6. Restituisci SOLO ed ESCLUSIVAMENTE la query finale.\n\n"
+        "Utente: {question}\n"
         "Riformulata:"
     )
     
