@@ -5,6 +5,7 @@ __pycache__/
 *.pdf
 *.md
 log.txt
+checkpoints*
 
 # Ignore serialized / binary files
 *.pickle

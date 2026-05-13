@@ -1,213 +1,191 @@
-# agentic_rag.py
-import os
-from typing import TypedDict, List, Literal
+import sqlite3
+import operator
+from typing import TypedDict, List, Annotated
+
 from langchain_core.documents import Document
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.sqlite import SqliteSaver
+
 from retriever import HybridRetriever
 
-# ── Stato condiviso del grafo ──────────────────────────────────────────────────
+# ==============================================================================
+# CONFIGURAZIONE
+# ==============================================================================
+
+OLLAMA_MODEL  = "llama3.2"
+CHECKPOINT_DB = "checkpoints.db"
+MAX_HISTORY   = 5     # turni (coppie domanda/risposta) da passare all'LLM
+MAX_CHECKPOINT_MESSAGES = 30  # limite messaggi salvati nel checkpoint per prevenire "string too big"
+
+
+# ==============================================================================
+# REDUCER PERSONALIZZATO
+# ==============================================================================
+
+def _limit_history_reducer(old_history: List[dict], new_messages: List[dict]) -> List[dict]:
+    """
+    Reducer che aggiunge nuovi messaggi ma mantiene solo gli ultimi MAX_CHECKPOINT_MESSAGES.
+    Evita che SQLite dia errore "string or blob too big" per checkpoint troppo grandi.
+    """
+    combined = old_history + new_messages
+    return combined[-MAX_CHECKPOINT_MESSAGES:]
+
+
+# ==============================================================================
+# STATO DEL GRAFO
+# ==============================================================================
 
 class AgentState(TypedDict):
-    query: str                  # domanda originale
-    rewritten_query: str        # eventuale query riformulata
-    documents: List[Document]   # docs recuperati
-    generation: str             # risposta generata
-    loop_count: int             # contatore cicli (anti-loop)
-    route: str                  # "web" | "pdf" | "both"
+    # --- input ---
+    query: str                       # domanda dell'utente
 
-# ── Modelli ────────────────────────────────────────────────────────────────────
+    # --- elaborazione interna ---
+    documents: List[Document]        # documenti recuperati
 
-llm = ChatOllama(model="llama3.2", temperature=0, num_ctx=2048)
-llm_json = ChatOllama(model="llama3.2", temperature=0, format="json")
+    # --- output ---
+    generation: str                  # risposta finale
 
-retriever = HybridRetriever()
+    # --- memoria conversazione ---
+    # Reducer personalizzato: aggiunge elementi ma limita la dimensione totale.
+    # Il checkpointer SQLite salva solo gli ultimi MAX_CHECKPOINT_MESSAGES messaggi.
+    chat_history: Annotated[List[dict], _limit_history_reducer]
 
-# ── NODO 1: Router ─────────────────────────────────────────────────────────────
-# Decide se cercare su web, PDF o entrambi in base alla natura della query
 
-ROUTER_PROMPT = ChatPromptTemplate.from_template("""
-Sei un router per un sistema RAG universitario (DIEM - Unisa).
-Analizza la domanda e rispondi SOLO con un JSON: {{"route": "web"|"pdf"|"both"}}
+# ==============================================================================
+# MODELLO LLM
+# ==============================================================================
 
-Regole:
-- "pdf"  → regolamenti, piani di studio, modulistica, bandi
-- "web"  → docenti, corsi, orari, news, contatti
-- "both" → domande generali o ambigue
+llm = ChatOllama(model=OLLAMA_MODEL, temperature=0.1, num_ctx=2048)
 
-Domanda: {query}
-""")
 
-def node_router(state: AgentState) -> AgentState:
-    chain = ROUTER_PROMPT | llm_json | StrOutputParser()
-    result = chain.invoke({"query": state["query"]})
-    try:
-        import json
-        route = json.loads(result).get("route", "both")
-    except Exception:
-        route = "both"
-    return {**state, "route": route, "loop_count": 0}
+# ==============================================================================
+# RETRIEVER (singleton) — inizializzato esternamente da build_graph()
+# ==============================================================================
 
-# ── NODO 2: Retrieval ──────────────────────────────────────────────────────────
+_retriever_instance = None
+
+def get_retriever() -> HybridRetriever:
+    global _retriever_instance
+    if _retriever_instance is None:
+        _retriever_instance = HybridRetriever()
+    return _retriever_instance
+
+
+# ==============================================================================
+# UTILITY
+# ==============================================================================
+
+def _format_history(history: List[dict], max_turns: int = MAX_HISTORY) -> str:
+    """
+    Converte gli ultimi N turni di chat_history in stringa leggibile dall'LLM.
+    Ogni turno è una coppia {"role": "user"|"assistant", "content": "..."}.
+    """
+    if not history:
+        return ""
+    recent = history[-(max_turns * 2):]
+    lines  = []
+    for msg in recent:
+        label = "Utente" if msg["role"] == "user" else "DIEMbot"
+        lines.append(f"{label}: {msg['content']}")
+    return "\n".join(lines)
+
+
+# ==============================================================================
+# NODO 1 — Retrieval
+# Passa la query dell'utente direttamente al retriever ibrido, senza riscrittura.
+# ==============================================================================
 
 def node_retrieve(state: AgentState) -> AgentState:
-    q = state.get("rewritten_query") or state["query"]
-    docs = retriever.retrieve(q)
+    docs = get_retriever().retrieve(state["query"])
     return {**state, "documents": docs}
 
-# ── NODO 3: Grader di rilevanza ────────────────────────────────────────────────
 
-GRADER_PROMPT = ChatPromptTemplate.from_template("""
-Valuta se il documento è pertinente alla domanda.
-Rispondi SOLO con JSON: {{"score": "yes"}} oppure {{"score": "no"}}
-
-Documento: {document}
-Domanda: {query}
-""")
-
-def node_grade_documents(state: AgentState) -> AgentState:
-    chain = GRADER_PROMPT | llm_json | StrOutputParser()
-    filtered = []
-    for doc in state["documents"]:
-        result = chain.invoke({
-            "document": doc.page_content[:500],
-            "query": state["query"]
-        })
-        try:
-            import json
-            if json.loads(result).get("score") == "yes":
-                filtered.append(doc)
-        except Exception:
-            filtered.append(doc)  # in caso di errore, tieni il doc
-    return {**state, "documents": filtered}
-
-# ── NODO 4: Query Rewriter ─────────────────────────────────────────────────────
-
-REWRITER_PROMPT = ChatPromptTemplate.from_template("""
-La query originale non ha prodotto risultati utili.
-Riformulala in modo più preciso per migliorare la ricerca vettoriale.
-Rispondi SOLO con la nuova query, senza spiegazioni.
-
-Query originale: {query}
-""")
-
-def node_rewrite(state: AgentState) -> AgentState:
-    chain = REWRITER_PROMPT | llm | StrOutputParser()
-    new_query = chain.invoke({"query": state["query"]})
-    return {
-        **state,
-        "rewritten_query": new_query.strip(),
-        "loop_count": state["loop_count"] + 1
-    }
-
-# ── NODO 5: Generator ─────────────────────────────────────────────────────────
+# ==============================================================================
+# NODO 2 — Generator
+# Genera la risposta usando documenti + history. Usa la domanda ORIGINALE
+# (non quella contestualizzata) per rispondere in modo naturale all'utente.
+# ==============================================================================
 
 SYSTEM_PROMPT = """
-Sei DIEMbot, l'assistente virtuale del DIEM (Università di Salerno).
-Rispondi in italiano in modo professionale.
-Basati ESCLUSIVAMENTE sul contesto fornito.
-Se l'informazione non è presente, dillo onestamente.
+Sei DIEMbot, l'assistente virtuale del DIEM (Dipartimento di Ingegneria dell'Informazione 
+ed Elettrica e Matematica applicata) dell'Università di Salerno.
+
+REGOLE:
+1. Rispondi in italiano in modo professionale e cordiale.
+2. Basati ESCLUSIVAMENTE sui documenti forniti nel "Contesto".
+3. Usa la "Conversazione precedente" per capire il contesto e risolvere riferimenti 
+   impliciti, ma NON inventare informazioni da essa.
+4. Se l'informazione non è nei documenti, dillo onestamente senza inventare nulla.
+5. Indica la fonte (es. "In base al sito DIEM...") quando disponibile nel contesto.
 """
 
 GEN_PROMPT = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
-    ("human", "Contesto:\n{context}\n\nDomanda: {question}")
+    ("human",
+     "Conversazione precedente:\n{history}\n\n"
+     "Contesto estratto dai documenti:\n{context}\n\n"
+     "Domanda: {question}")
 ])
 
 def node_generate(state: AgentState) -> AgentState:
     context = "\n\n---\n\n".join([
-        f"[Fonte: {d.metadata.get('source','?')}]\n{d.page_content}"
-        for d in state["documents"]
-    ]) or "Nessun documento pertinente trovato."
-    
-    chain = GEN_PROMPT | llm | StrOutputParser()
+        f"[Documento {i+1} | Fonte: {d.metadata.get('source', '?')}]\n{d.page_content}"
+        for i, d in enumerate(state["documents"])
+    ]) if state["documents"] else "Nessun documento pertinente trovato."
+
+    chain      = GEN_PROMPT | llm | StrOutputParser()
     generation = chain.invoke({
-        "context": context,
-        "question": state["query"]
+        "history":  _format_history(state.get("chat_history", [])),
+        "context":  context,
+        "question": state["query"],
     })
     return {**state, "generation": generation}
 
-# ── NODO 6: Hallucination Checker ─────────────────────────────────────────────
 
-HALLUC_PROMPT = ChatPromptTemplate.from_template("""
-La risposta è supportata dai documenti forniti?
-Rispondi SOLO con JSON: {{"grounded": "yes"}} oppure {{"grounded": "no"}}
+# ==============================================================================
+# NODO 3 — Update History
+# Appende il turno corrente alla chat_history tramite il reducer operator.add.
+# ==============================================================================
 
-Documenti: {documents}
-Risposta: {generation}
-""")
+def node_update_history(state: AgentState) -> dict:
+    return {
+        "chat_history": [
+            {"role": "user",      "content": state["query"]},
+            {"role": "assistant", "content": state["generation"]},
+        ]
+    }
 
-def node_check_hallucination(state: AgentState) -> AgentState:
-    if not state["documents"]:
-        return state  # nessun doc, non possiamo verificare
-    
-    chain = HALLUC_PROMPT | llm_json | StrOutputParser()
-    result = chain.invoke({
-        "documents": "\n".join([d.page_content[:300] for d in state["documents"]]),
-        "generation": state["generation"]
-    })
-    # Il risultato viene usato dall'edge condizionale, non modifica lo stato
-    try:
-        import json
-        grounded = json.loads(result).get("grounded", "yes")
-    except Exception:
-        grounded = "yes"
-    return {**state, "_grounded": grounded}
 
-# ── EDGE CONDIZIONALI ──────────────────────────────────────────────────────────
-
-def edge_check_relevance(state: AgentState) -> Literal["generate", "rewrite"]:
-    """Dopo il grading: se hai docs rilevanti genera, altrimenti riscrivi."""
-    if state["documents"]:
-        return "generate"
-    if state["loop_count"] >= 2:  # stop anti-loop
-        return "generate"
-    return "rewrite"
-
-def edge_check_hallucination(state: AgentState) -> Literal["end", "generate"]:
-    """Dopo il check: se grounded termina, altrimenti rigenera."""
-    if state.get("_grounded", "yes") == "yes" or state["loop_count"] >= 2:
-        return "end"
-    return "generate"
-
-# ── COSTRUZIONE DEL GRAFO ──────────────────────────────────────────────────────
+# ==============================================================================
+# COSTRUZIONE DEL GRAFO
+# ==============================================================================
 
 def build_graph():
+    """
+    Grafo lineare: retrieve → generate → update_history → END
+
+    Contestualizzazione, router, grader e hallucination checker rimossi.
+    Il retriever viene inizializzato qui, in modo che il caricamento
+    di FAISS/reranker avvenga allo startup e non alla prima query.
+    """
+    # Inizializzazione eager: carica FAISS e reranker subito
+    get_retriever()
+
+    conn   = sqlite3.connect(CHECKPOINT_DB, check_same_thread=False)
+    memory = SqliteSaver(conn)
+
     g = StateGraph(AgentState)
 
-    g.add_node("router",      node_router)
-    g.add_node("retrieve",    node_retrieve)
-    g.add_node("grade",       node_grade_documents)
-    g.add_node("rewrite",     node_rewrite)
-    g.add_node("generate",    node_generate)
-    g.add_node("check_halluc",node_check_hallucination)
+    g.add_node("retrieve",       node_retrieve)
+    g.add_node("generate",       node_generate)
+    g.add_node("update_history", node_update_history)
 
-    g.set_entry_point("router")
-    g.add_edge("router",   "retrieve")
-    g.add_edge("retrieve", "grade")
-    g.add_conditional_edges("grade", edge_check_relevance, {
-        "generate": "generate",
-        "rewrite":  "rewrite"
-    })
-    g.add_edge("rewrite", "retrieve")  # ← il ciclo
-    g.add_edge("generate", "check_halluc")
-    g.add_conditional_edges("check_halluc", edge_check_hallucination, {
-        "end":      END,
-        "generate": "generate"
-    })
+    g.set_entry_point("retrieve")
+    g.add_edge("retrieve",       "generate")
+    g.add_edge("generate",       "update_history")
+    g.add_edge("update_history", END)
 
-    return g.compile()
-
-# Istanza globale riusabile
-rag_graph = build_graph()
-
-def ask(query: str) -> dict:
-    result = rag_graph.invoke({"query": query})
-    return {
-        "answer":    result["generation"],
-        "sources":   [d.metadata.get("source") for d in result["documents"]],
-        "rewrote":   result.get("rewritten_query"),
-        "route":     result["route"],
-    }
+    return g.compile(checkpointer=memory)
