@@ -70,14 +70,23 @@ class HybridRetriever:
                 out.append(doc)
         return out
 
-    def retrieve(self, query: str):
-        web_chunks = self.web_vs.similarity_search(query, k=K_WEB)
-        try:
-            pdf_chunks = self.pdf_retriever.invoke(query)
-        except Exception as e:
-            print(f"  [PDF] Retrieval fallito: {e}")
-            pdf_chunks = []
+    def retrieve(self, query: str, tipo_fonte: str = "all"):
+        web_chunks = []
+        pdf_chunks = []
 
+        # 1. Cerca nel database Web (se richiesto)
+        if tipo_fonte in ["all", "web"]:
+            web_chunks = self.web_vs.similarity_search(query, k=K_WEB)
+            
+        # 2. Cerca nel database PDF (se richiesto)
+        if tipo_fonte in ["all", "pdf"]:
+            try:
+                pdf_chunks = self.pdf_retriever.invoke(query)
+            except Exception as e:
+                print(f"  [PDF] Retrieval fallito: {e}")
+                pdf_chunks = []
+
+        # Unisce i risultati trovati (che saranno solo Web, solo PDF, o entrambi)
         all_candidates = self._dedup(web_chunks + pdf_chunks)
         if not all_candidates:
             return []
