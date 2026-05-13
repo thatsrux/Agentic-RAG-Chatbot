@@ -11,9 +11,9 @@ from langchain_text_splitters.character import RecursiveCharacterTextSplitter
 from sentence_transformers import CrossEncoder
 
 VS_DIR = "vectorstores"
-K_WEB = 15       # Candidati iniziali dal web (aumentato per migliore copertura)
-K_PDF = 5        # Candidati iniziali dai PDF (aumentato per migliore copertura)
-TOP_N = 5        # Documenti finali passati all'LLM (aumentato da 3 per miglior qualità)
+K_WEB = 10       # Riduci da 15 a 10 (candidati iniziali)
+K_PDF = 3        # Riduci da 5 a 3 (candidati iniziali)
+TOP_N = 3        # Riduci da 5 a 3. L'LLM leggerà SOLO i 3 pezzi di testo migliori in assoluto!
 
 PDF_CHILD_SIZE = 400
 PDF_CHILD_OVERLAP = 40
