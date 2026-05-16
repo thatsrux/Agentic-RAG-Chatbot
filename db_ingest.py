@@ -1,6 +1,7 @@
 import pickle
 import os
 import shutil
+import re
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import MarkdownTextSplitter, RecursiveCharacterTextSplitter
@@ -34,9 +35,31 @@ def get_embedding_model():
         model_kwargs={"device": device},
         encode_kwargs={
             "normalize_embeddings": True,
-            "batch_size": 128
+            "batch_size": 64
         }
     )
+
+def universal_markdown_cleaner(text: str) -> str:
+    """
+    Pulisce e normalizza il Markdown generato dagli scraper per 
+    aiutare il Text Splitter a tagliare nei punti giusti.
+    """
+    if not text:
+        return ""
+
+    # 1. RIMOZIONE URL (SICURA): Rimuove i link MA ignora le immagini
+    text = re.sub(r'(?<!\!)\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    
+    # 2. SALVATAGGIO TABELLE: Inserisce \n\n se una riga finisce con '|' e la successiva ha testo
+    text = re.sub(r'(\|\s*)\n([a-zA-Z0-9\[])', r'\1\n\n\2', text)
+
+    # 3. NORMALIZZAZIONE DEI TITOLI: Assicura un solo \n\n prima di un titolo
+    text = re.sub(r'\n+#+\s+', r'\n\n# ', text)
+    
+    # 4. PULIZIA FINALE: Collassa i ritorni a capo eccessivi a un massimo di due (\n\n)
+    text = re.sub(r'\n{3,}', r'\n\n', text)
+    
+    return text
 
 def main():
     if not os.path.exists(KB_FILE):
@@ -46,9 +69,16 @@ def main():
     with open(KB_FILE, "rb") as f:
         all_docs = pickle.load(f)
 
-    # Filtriamo a monte i documenti Web troppo corti 
-    web_docs = [d for d in all_docs if d.metadata.get("type") == "web" and len(d.page_content.strip()) > 100]
-    pdf_docs = [d for d in all_docs if d.metadata.get("type") == "pdf"]
+    web_docs = []
+    pdf_docs = []
+
+    for d in all_docs:
+        if d.metadata.get("type") == "web":
+            if len(d.page_content.strip()) > 100:
+                d.page_content = universal_markdown_cleaner(d.page_content)
+                web_docs.append(d)
+        elif d.metadata.get("type") == "pdf":
+            pdf_docs.append(d)
 
     emb = get_embedding_model()
 
