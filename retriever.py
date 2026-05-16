@@ -1,91 +1,435 @@
 import os
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-os.environ["OMP_NUM_THREADS"] = "1"
-
-from langchain_core.documents import Document
+import hashlib
+import torch
+from concurrent.futures import ThreadPoolExecutor
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_classic.retrievers.parent_document_retriever import ParentDocumentRetriever
 from langchain_classic.storage import LocalFileStore, create_kv_docstore
-from langchain_text_splitters.character import RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownTextSplitter, RecursiveCharacterTextSplitter
 from sentence_transformers import CrossEncoder
+from rank_bm25 import BM25Okapi
+from config import device
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["HF_TOKEN"] = "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"
+
+# =========================================================
+# CONFIG
+# =========================================================
 
 VS_DIR = "vectorstores"
-K_WEB = 10       # Riduci da 15 a 10 (candidati iniziali)
-K_PDF = 3        # Riduci da 5 a 3 (candidati iniziali)
-TOP_N = 3        # Riduci da 5 a 3. L'LLM leggerà SOLO i 3 pezzi di testo migliori in assoluto!
 
-PDF_CHILD_SIZE = 400
-PDF_CHILD_OVERLAP = 40
-PDF_PARENT_SIZE = 2000
-PDF_PARENT_OVERLAP = 200
+K_WEB = 10
+K_PDF = 5
+
+TOP_N = 5
+
+# WEB
+WEB_CHILD_SIZE = 800
+WEB_CHILD_OVERLAP = 80
+WEB_PARENT_SIZE = 3000
+WEB_PARENT_OVERLAP = 300
+
+# PDF
+PDF_CHILD_SIZE = 800
+PDF_CHILD_OVERLAP = 80
+PDF_PARENT_SIZE = 3000
+PDF_PARENT_OVERLAP = 300
+
+BM25_ENABLED = True
+
+# =========================================================
+# RETRIEVER
+# =========================================================
 
 class HybridRetriever:
+
     def __init__(self):
-        print("[RETRIEVER] Inizializzazione sistema FAISS-only...")
+
+        print("[RETRIEVER] Initializing system...")
+
         self.emb = self._load_embedding_model()
-        self.web_vs = self._load_web_vs()
+
+        self.web_retriever, self.web_vs = self._load_web_retriever()
+
         self.pdf_retriever = self._load_pdf_retriever()
+
         self.reranker = self._load_reranker()
-        print("[RETRIEVER] Sistema pronto.")
+
+        self.bm25 = None
+        self.bm25_docs = []
+
+        if BM25_ENABLED:
+            self._initialize_bm25()
+
+        print("[RETRIEVER] System ready.")
+
+    # =====================================================
+    # EMBEDDINGS
+    # =====================================================
 
     def _load_embedding_model(self):
-        return HuggingFaceEmbeddings(model_name="BAAI/bge-m3", encode_kwargs={"normalize_embeddings": True})
 
-    def _load_web_vs(self):
-        print("  [VS] Caricamento FAISS Web...")
-        return FAISS.load_local(
-            os.path.join(VS_DIR, "faiss_web"), 
-            self.emb, 
-            allow_dangerous_deserialization=True # Richiesto dalle nuove versioni di Langchain
+        print("  [EMB] Loading BAAI/bge-m3...")
+
+        return HuggingFaceEmbeddings(
+            model_name="BAAI/bge-m3",
+            model_kwargs={
+                "device": device
+            },
+            encode_kwargs={
+                "normalize_embeddings": True,
+                "batch_size": 32
+            }
         )
 
-    def _load_pdf_retriever(self):
-        print("  [PDF] Caricamento FAISS Parent-Child...")
+    # =====================================================
+    # VECTORSTORES & RETRIEVERS
+    # =====================================================
+
+    def _load_web_retriever(self):
+
+        print("  [WEB] Loading Parent-Child FAISS Web...")
+
         child_vectorstore = FAISS.load_local(
-            os.path.join(VS_DIR, "faiss_pdf_child"), 
-            self.emb, 
+            os.path.join(VS_DIR, "faiss_web_child"),
+            self.emb,
             allow_dangerous_deserialization=True
         )
-        parent_docstore = create_kv_docstore(LocalFileStore(os.path.join(VS_DIR, "docstore_pdf")))
+
+        parent_docstore = create_kv_docstore(
+            LocalFileStore(
+                os.path.join(VS_DIR, "docstore_web")
+            )
+        )
+
+        retriever = ParentDocumentRetriever(
+            vectorstore=child_vectorstore,
+            docstore=parent_docstore,
+            child_splitter=MarkdownTextSplitter(
+                chunk_size=WEB_CHILD_SIZE,
+                chunk_overlap=WEB_CHILD_OVERLAP,
+            ),
+            parent_splitter=MarkdownTextSplitter(
+                chunk_size=WEB_PARENT_SIZE,
+                chunk_overlap=WEB_PARENT_OVERLAP,
+            ),
+            search_kwargs={
+                "k": K_WEB
+            }
+        )
+        
+        return retriever, child_vectorstore
+
+    def _load_pdf_retriever(self):
+
+        print("  [PDF] Loading Parent-Child FAISS PDF...")
+
+        child_vectorstore = FAISS.load_local(
+            os.path.join(VS_DIR, "faiss_pdf_child"),
+            self.emb,
+            allow_dangerous_deserialization=True
+        )
+
+        parent_docstore = create_kv_docstore(
+            LocalFileStore(
+                os.path.join(VS_DIR, "docstore_pdf")
+            )
+        )
 
         return ParentDocumentRetriever(
             vectorstore=child_vectorstore,
             docstore=parent_docstore,
-            child_splitter=RecursiveCharacterTextSplitter(chunk_size=PDF_CHILD_SIZE, chunk_overlap=PDF_CHILD_OVERLAP),
-            parent_splitter=RecursiveCharacterTextSplitter(chunk_size=PDF_PARENT_SIZE, chunk_overlap=PDF_PARENT_OVERLAP),
-            search_kwargs={"k": K_PDF},
+            child_splitter=RecursiveCharacterTextSplitter(
+                chunk_size=PDF_CHILD_SIZE,
+                chunk_overlap=PDF_CHILD_OVERLAP,
+                separators=["\n\n", ". ", "\n", " ", ""]
+            ),
+            parent_splitter=RecursiveCharacterTextSplitter(
+                chunk_size=PDF_PARENT_SIZE,
+                chunk_overlap=PDF_PARENT_OVERLAP,
+                separators=["\n\n", ". ", "\n", " ", ""]
+            ),
+            search_kwargs={
+                "k": K_PDF
+            }
         )
 
+    # =====================================================
+    # RERANKER
+    # =====================================================
+
     def _load_reranker(self):
-        print("  [RERANKER] Caricamento mmarco-mMiniLMv2...")
-        return CrossEncoder("cross-encoder/mmarco-mMiniLMv2-L12-H384-v1")
+        print("  [RERANKER] Loading BAAI/bge-reranker-v2-m3...")
+        return CrossEncoder(
+            "BAAI/bge-reranker-v2-m3",
+            model_kwargs={"torch_dtype": torch.float16},
+            max_length=1024,
+            device=device
+        )
+
+    # =====================================================
+    # BM25
+    # =====================================================
+
+    def _initialize_bm25(self):
+
+        print("  [BM25] Building sparse index...")
+
+        try:
+
+            docs = []
+
+            # Carica i chunk Web Child per costruire l'indice delle keyword
+            web_docs = self.web_vs.similarity_search(
+                "test",
+                k=100000
+            )
+
+            docs.extend(web_docs)
+
+            self.bm25_docs = docs
+
+            tokenized = [
+                d.page_content.lower().split()
+                for d in docs
+            ]
+
+            self.bm25 = BM25Okapi(tokenized)
+
+            print(f"  [BM25] Indexed {len(docs)} documents.")
+
+        except Exception as e:
+
+            print(f"  [BM25] Failed: {e}")
+
+    # =====================================================
+    # DEDUP
+    # =====================================================
 
     def _dedup(self, docs):
-        seen, out = set(), []
+
+        seen = set()
+        output = []
+
         for doc in docs:
-            key = doc.page_content.strip()[:120]
+
+            content = doc.page_content.strip()
+
+            key = hashlib.md5(
+                content.encode("utf-8")
+            ).hexdigest()
+
             if key not in seen:
+
                 seen.add(key)
-                out.append(doc)
-        return out
 
-    def retrieve(self, query: str):
-        web_chunks = self.web_vs.similarity_search(query, k=K_WEB)
+                output.append(doc)
+
+        return output
+
+    # =====================================================
+    # WEB RETRIEVAL
+    # =====================================================
+
+    def _retrieve_web(self, query):
+
         try:
-            pdf_chunks = self.pdf_retriever.invoke(query)
-        except Exception as e:
-            print(f"  [PDF] Retrieval fallito: {e}")
-            pdf_chunks = []
 
-        all_candidates = self._dedup(web_chunks + pdf_chunks)
-        if not all_candidates:
+            return self.web_retriever.invoke(query)
+
+        except Exception as e:
+
+            print(f"[WEB] Retrieval failed: {e}")
+
             return []
 
-        pairs = [[query, d.page_content] for d in all_candidates]
-        scores = self.reranker.predict(pairs)
-        ranked = sorted(zip(all_candidates, scores), key=lambda x: x[1], reverse=True)
+    # =====================================================
+    # PDF RETRIEVAL
+    # =====================================================
 
-        # Filtriamo via la stringa "init" tecnica usata in fase di creazione PDF
-        final_docs = [doc for doc, _ in ranked if doc.page_content != "init"]
+    def _retrieve_pdf(self, query):
+
+        try:
+
+            return self.pdf_retriever.invoke(query)
+
+        except Exception as e:
+
+            print(f"[PDF] Retrieval failed: {e}")
+
+            return []
+
+    # =====================================================
+    # BM25 RETRIEVAL
+    # =====================================================
+
+    def _retrieve_bm25(self, query):
+
+        if self.bm25 is None:
+            return []
+
+        try:
+
+            tokens = query.lower().split()
+
+            scores = self.bm25.get_scores(tokens)
+
+            ranked = sorted(
+                zip(self.bm25_docs, scores),
+                key=lambda x: x[1],
+                reverse=True
+            )
+
+            return [
+                doc
+                for doc, score in ranked[:K_WEB]
+            ]
+
+        except Exception as e:
+
+            print(f"[BM25] Retrieval failed: {e}")
+
+            return []
+
+    # =====================================================
+    # RETRIEVE FUNCTION
+    # =====================================================
+
+    def retrieve(self, query, route="both"):
+
+        web_chunks = []
+        pdf_chunks = []
+        bm25_chunks = []
+
+        # =================================================
+        # PARALLEL RETRIEVAL
+        # =================================================
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+
+            futures = {}
+
+            # WEB
+            if route in ["web", "both"]:
+
+                futures["web"] = executor.submit(
+                    self._retrieve_web,
+                    query
+                )
+
+            # PDF
+            if route in ["pdf", "both"]:
+
+                futures["pdf"] = executor.submit(
+                    self._retrieve_pdf,
+                    query
+                )
+
+            # BM25
+            if BM25_ENABLED:
+
+                futures["bm25"] = executor.submit(
+                    self._retrieve_bm25,
+                    query
+                )
+
+            # COLLECT
+
+            if "web" in futures:
+                web_chunks = futures["web"].result()
+
+            if "pdf" in futures:
+                pdf_chunks = futures["pdf"].result()
+
+            if "bm25" in futures:
+                bm25_chunks = futures["bm25"].result()
+
+        # =================================================
+        # MERGE
+        # =================================================
+
+        all_candidates = self._dedup(
+            web_chunks +
+            pdf_chunks +
+            bm25_chunks
+        )
+
+        if not all_candidates:
+
+            return []
+
+        # =================================================
+        # RERANK
+        # =================================================
+
+        pairs = [
+            [query, d.page_content]
+            for d in all_candidates
+        ]
+
+        scores = self.reranker.predict(
+            pairs,
+            batch_size=64,
+            show_progress_bar=False
+        )
+
+        ranked = sorted(
+            zip(all_candidates, scores),
+            key=lambda x: x[1],
+            reverse=True
+        )
+
+        # =================================================
+        # FILTER
+        # =================================================
+
+        final_docs = []
+
+        for doc, score in ranked:
+
+            if doc.page_content == "__dummy__":
+                continue
+
+            doc.metadata["rerank_score"] = float(score)
+
+            final_docs.append(doc)
+
+        final_docs = sorted(
+            final_docs,
+            key=lambda d: d.metadata["rerank_score"],
+            reverse=True
+        )
+
         return final_docs[:TOP_N]
+
+if __name__ == "__main__":
+
+    retriever = HybridRetriever()
+
+    while True:
+
+        query = input("\nQuery > ").strip()
+
+        if query.lower() in ["exit", "quit"]:
+            break
+
+        docs = retriever.retrieve(query)
+
+        print("\n================ RESULTS ================\n")
+
+        for i, doc in enumerate(docs, start=1):
+
+            print(f"[{i}] Score: {doc.metadata.get('rerank_score'):.4f}")
+
+            print(f"Type: {doc.metadata.get('type')}")
+
+            print(f"Source: {doc.metadata.get('source')}")
+
+            print("\n")
+
+            print(doc.page_content[:2000])
+
+            print("\n----------------------------------------")
