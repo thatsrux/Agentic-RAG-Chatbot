@@ -34,7 +34,7 @@ def get_embedding_model():
         model_kwargs={"device": device},
         encode_kwargs={
             "normalize_embeddings": True,
-            "batch_size": 512
+            "batch_size": 128
         }
     )
 
@@ -83,7 +83,7 @@ def main():
         parent_splitter=web_parent_splitter,
     )
 
-    batch_size_web = 20
+    batch_size_web = 5
     total_web_batches = (len(web_docs) + batch_size_web - 1) // batch_size_web
     print(f"  [WEB] Trovati {len(web_docs)} documenti originali. Suddivisi in {total_web_batches} blocchi.")
 
@@ -128,7 +128,7 @@ def main():
         parent_splitter=pdf_parent_splitter,
     )
 
-    batch_size_pdf = 20
+    batch_size_pdf = 5
     total_pdf_batches = (len(pdf_docs) + batch_size_pdf - 1) // batch_size_pdf
     print(f"  [PDF] Trovati {len(pdf_docs)} documenti originali. Suddivisi in {total_pdf_batches} blocchi.")
 
