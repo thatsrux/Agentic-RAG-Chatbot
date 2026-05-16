@@ -1,8 +1,8 @@
 import streamlit as st
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from config import RAGState, RAG_PROMPT, DOMAIN_PROMPT, GRADER_PROMPT, REWRITE_PROMPT, MAX_RETRIES
-from utils import load_llm, format_context
+from utils.config import RAGState, RAG_PROMPT, DOMAIN_PROMPT, GRADER_PROMPT, REWRITE_PROMPT, MAX_RETRIES
+from utils.utils import load_llm, format_context
 
 def domain_guard_node(state: RAGState):
     question = state["question"]

@@ -1,9 +1,9 @@
 import os
 import streamlit as st
 from langgraph.graph import StateGraph, START, END
-from config import RAGState
-from nodes import *
-from retriever import HybridRetriever
+from utils.config import RAGState
+from utils.nodes import *
+from utils.retriever import HybridRetriever
 
 # --- PROTEZIONE CRASH ---
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
