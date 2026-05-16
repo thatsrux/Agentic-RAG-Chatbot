@@ -1,18 +1,7 @@
 #general
 __pycache__/
 
-# Ignore documents
-*.pdf
-*.md
-log.txt
-checkpoints*
-
-# Ignore serialized / binary files
-*.pickle
-*.bin
-*.pkl
-
 # Ignore database files
-*.sqlite3
-vectorstores/
-data/
+knowledge/
+
+llm_env/

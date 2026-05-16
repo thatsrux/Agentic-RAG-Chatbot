@@ -9,7 +9,7 @@ from langchain_classic.storage import LocalFileStore, create_kv_docstore
 from langchain_text_splitters import MarkdownTextSplitter, RecursiveCharacterTextSplitter
 from sentence_transformers import CrossEncoder
 from rank_bm25 import BM25Okapi
-from config import device
+from utils.config import device
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -19,7 +19,7 @@ os.environ["HF_TOKEN"] = "HF_TOKEN_REMOVED"
 # CONFIG
 # =========================================================
 
-VS_DIR = "vectorstores"
+VS_DIR = "knowledge/vectorstores"
 
 K_WEB = 10
 K_PDF = 5
