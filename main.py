@@ -24,12 +24,11 @@ def get_retriever() -> HybridRetriever:
 @st.cache_resource(show_spinner=False)
 def get_llm() -> ChatOllama:
     """Carica e mantiene in cache l'istanza del LLM."""
-    return ChatOllama(model="llama3.2", temperature=0.1)
+    return ChatOllama(model="llama3.1", temperature=0.1)
 
 @tool
 def search_diem_documents(testo_ricerca: str, tipo_fonte: str = "all") -> str:
     """Usa questo strumento per cercare nei documenti ufficiali del DIEM.
-    MOLTO IMPORTANTE: Inserisci SOLO PAROLE CHIAVE essenziali.
 
     REGOLE PER IL PARAMETRO 'tipo_fonte':
     - Usa "web" se l'utente chiede di: aule, orari, contatti, docenti o informazioni di servizio.
@@ -42,7 +41,9 @@ def search_diem_documents(testo_ricerca: str, tipo_fonte: str = "all") -> str:
     results = []
     for doc in raw_docs:
         fonte = doc.metadata.get("source", "Fonte sconosciuta")
-        results.append(f"[Fonte: {fonte}]\n{doc.page_content}")
+        score = doc.metadata.get("score", 0.0) # Recupera lo score
+        # Aggiunge lo score in grassetto sotto la fonte
+        results.append(f"[Fonte: {fonte}]\n**Score di rilevanza:** {score:.3f}\n{doc.page_content}")
     return "\n\n---\n\n".join(results)
 
 
@@ -53,23 +54,16 @@ _SYS_AGENT = """Sei DIEMbot, l'assistente virtuale del DIEM (Università di Sale
 Rispondi sempre in italiano professionale.
 
 REGOLE PER L'USO DELLO STRUMENTO DI RICERCA:
-1. Cerca SOLO ed ESCLUSIVAMENTE l'argomento dell'ULTIMA domanda dell'utente.
-2. NON mescolare MAI argomenti o parole chiave di domande precedenti con quella attuale.
-3. Estrai solo 1 o 2 parole chiave."""
+1. Cerca SOLO ed ESCLUSIVAMENTE l'argomento della domanda dell'utente.
+"""
 
 _SYS_REWRITE = """Sei un estrattore automatico di parole chiave.
-Il tuo UNICO scopo è estrarre 2-3 parole chiave essenziali dalla domanda.
+Il tuo UNICO scopo è estrarre le parole essenziali dalla domanda.
 REGOLE RIGIDE:
 - NON rispondere alla domanda.
 - NON aggiungere spiegazioni, saluti o contesto.
 - Restituisci ESCLUSIVAMENTE il testo da cercare.
-
-Esempi:
-Domanda: Chi è Mario Vento?
-Risultato: Mario Vento
-
-Domanda: Quali sono gli orari per la segreteria studenti?
-Risultato: orari segreteria studenti"""
+"""
 
 _SYS_GENERATE = """Sei DIEMbot, l'assistente virtuale istituzionale del DIEM (Università di Salerno).
 Il tuo compito è rispondere alle domande degli utenti basandoti ESCLUSIVAMENTE sul contesto fornito, in italiano corretto e professionale.

@@ -14,7 +14,7 @@ from sentence_transformers import CrossEncoder
 VS_DIR = "vectorstores"
 K_WEB = 10       # Candidati iniziali web
 K_PDF = 3        # Candidati iniziali PDF
-TOP_N = 3        # Risultati finali dopo reranking
+TOP_N = 5        # Risultati finali dopo reranking
 
 # Parametri PDF (chunk più grandi)
 PDF_CHILD_SIZE = 400
@@ -145,7 +145,11 @@ class HybridRetriever:
         scores = self.reranker.predict(pairs)
         ranked = sorted(zip(all_candidates, scores), key=lambda x: x[1], reverse=True)
 
-        # 5. Filtra il placeholder tecnico "init" e restituisce top-N
-        final_docs = [doc for doc, _ in ranked if doc.page_content.strip() != "init"]
+        final_docs = []
+        for doc, score in ranked:
+            if doc.page_content.strip() != "init":
+                doc.metadata["score"] = float(score)
+                final_docs.append(doc)
+                
         print(f"  [RETRIEVER] Restituzione top-{min(TOP_N, len(final_docs))} documenti.")
         return final_docs[:TOP_N]
