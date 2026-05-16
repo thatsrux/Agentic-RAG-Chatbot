@@ -1,13 +1,13 @@
 import streamlit as st
 from langchain_ollama import ChatOllama
-from config import OLLAMA_MODEL
+from utils.config import OLLAMA_MODEL
 
 @st.cache_resource(show_spinner=False)
 def load_llm():
     """Carica il modello LLM (Ollama) nella cache di sistema."""
     return ChatOllama(
         model=OLLAMA_MODEL, 
-        temperature=0,
+        temperature=0.1,
         num_ctx=8192 
     )
 

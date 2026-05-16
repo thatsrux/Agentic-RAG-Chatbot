@@ -20,11 +20,11 @@ from langchain_core.documents import Document
 logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 # --- CONFIGURAZIONE ---
-DATA_PATH = r"data"
+DATA_PATH = r"knowledge/data"
 PAGES_DIR = os.path.join(DATA_PATH, "pages")     
 PDF_MD_DIR = os.path.join(DATA_PATH, "PDFs")   
-STATE_FILE = "crawler_state.json"
-KB_FILE = "knowledge_base.pkl"
+STATE_FILE = "knowledge/crawler_state.json"
+KB_FILE = "knowledge/knowledge_base.pkl"
 
 os.makedirs(PAGES_DIR, exist_ok=True)
 os.makedirs(PDF_MD_DIR, exist_ok=True)

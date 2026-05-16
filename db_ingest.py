@@ -7,11 +7,11 @@ from langchain_text_splitters import MarkdownTextSplitter, RecursiveCharacterTex
 from langchain_classic.retrievers.parent_document_retriever import ParentDocumentRetriever
 from langchain_classic.storage import LocalFileStore, create_kv_docstore
 
-from config import device
+from utils.config import device
 
 # --- CONFIGURAZIONE ---
-KB_FILE = "knowledge_base.pkl"
-VS_DIR = "vectorstores"
+KB_FILE = "knowledge/knowledge_base.pkl"
+VS_DIR = "knowledge/vectorstores"
 
 # WEB
 WEB_CHILD_SIZE = 800
