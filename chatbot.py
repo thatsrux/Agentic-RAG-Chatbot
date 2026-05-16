@@ -1,82 +1,103 @@
 import os
 import streamlit as st
+from langgraph.graph import StateGraph, START, END
+from config import RAGState
+from nodes import *
+from retriever import HybridRetriever
 
-# --- PROTEZIONE CRASH E OTTIMIZZAZIONE ---
+# --- PROTEZIONE CRASH ---
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["OMP_NUM_THREADS"] = "1"
 
-from langchain_ollama import ChatOllama
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from retriever import HybridRetriever
+def build_graph():
+    workflow = StateGraph(RAGState)
 
-# --- CONFIGURAZIONE ---
-OLLAMA_MODEL = "llama3.2" # Modello ottimale per velocità/risorse
+    workflow.add_node("domain_guard", domain_guard_node)
+    workflow.add_node("retrieve", retrieve_node)
+    workflow.add_node("generate", generate_node)
+    workflow.add_node("grade_generation", grade_generation_node)
+    workflow.add_node("rewrite", rewrite_node)
+    workflow.add_node("fallback", fallback_node)
 
-# --- PROMPT DEL ROUTER (Decide se serve il RAG) ---
-ROUTER_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", """Sei un addetto all'accoglienza del dipartimento DIEM. 
-    Analizza la domanda dell'utente. Se riguarda docenti, professori, aule, corsi di laurea, 
-    esami o regole del dipartimento, rispondi SEMPRE 'SÌ'. 
-    Altrimenti rispondi 'NO'. Rispondi SOLO con la parola 'SÌ' o 'NO'."""),
-    ("human", "{question}")
-])
+    workflow.add_edge(START, "domain_guard")
 
-# --- PROMPT DELLA RISPOSTA (Genera la risposta finale) ---
-ANSWER_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", """Sei DIEMbot, l'assistente virtuale ufficiale del DIEM.
-    
-    REGOLE DI RISPOSTA:
-    1. Usa il CONTESTO fornito per rispondere in modo professionale in italiano.
-    2. Se il CONTESTO non contiene informazioni utili, scusa l'inconveniente e suggerisci 
-       all'utente di essere più specifico (es. indicando il nome completo di un docente).
-    3. Cita sempre la fonte se disponibile (es. [Fonte: sito docenti]).
-    4. Se la domanda è un saluto generico, rispondi cordialmente senza cercare nel database.
-
-    CONTESTO ESTRATTO DAL DATABASE:
-    {context}"""),
-    ("human", "{question}")
-])
-
-# --- INIZIALIZZAZIONE RISORSE ---
-@st.cache_resource(show_spinner=False)
-def load_llm():
-    """Carica Ollama con un limite di contesto per evitare crash della VRAM."""
-    return ChatOllama(
-        model=OLLAMA_MODEL, 
-        temperature=0.1, # Leggera creatività per la fluidità, ma resta ancorato ai dati
-        num_ctx=3072     # Bilanciamento ideale per non saturare la GPU
+    workflow.add_conditional_edges(
+        "domain_guard", route_after_domain,
+        {"in_domain": "retrieve", "out_of_domain": END}
     )
 
-@st.cache_resource(show_spinner=False)
-def load_retriever():
-    """Carica il sistema di retrieval (FAISS + Reranker)."""
-    return HybridRetriever()
+    workflow.add_edge("retrieve", "generate")
+    workflow.add_edge("generate", "grade_generation")
+
+    workflow.add_conditional_edges(
+        "grade_generation", route_after_grade,
+        {"useful": END, "rewrite": "rewrite", "max_retries": "fallback"}
+    )
+
+    workflow.add_edge("rewrite", "retrieve")
+    workflow.add_edge("fallback", END)
+
+    return workflow.compile()
 
 def main():
-    st.set_page_config(
-        page_title="DIEMbot — Agentic Router",
-        page_icon="🎓",
-        layout="centered"
-    )
-
+    st.set_page_config(page_title="DIEMbot", page_icon="🎓", layout="centered")
     st.title("🎓 DIEMbot")
-    st.caption("Sistema Agentic RAG con Routing Intelligente")
+    st.caption("Assistente virtuale ufficiale del DIEM – Università di Salerno")
 
-    # Caricamento backend
-    llm = load_llm()
-    retriever = load_retriever()
+    if "retriever" not in st.session_state:
+        with st.spinner("Caricamento del database della conoscenza..."):
+            st.session_state.retriever = HybridRetriever()
+            st.success("Database caricato con successo!")
 
-    # Gestione cronologia
+    rag_app = build_graph()
+
     if "messages" not in st.session_state:
         st.session_state.messages = []
+    
+    with st.sidebar:
+        st.header("Impostazioni")
+        show_sources = st.toggle("Mostra fonti estratte", value=True)
+        if st.button("🗑️ Cancella chat", use_container_width=True):
+            st.session_state.messages = []
+            st.rerun()
+        st.divider()
+        st.markdown("**Esempi di domande:**")
+        sample_questions = [
+            "Quali sono i corsi offerti dal DIEM?",
+            "Ho ottenuto un punteggio di 18 al TOLC. Posso iscrivermi?",
+            "Quali sono i requisiti di ammissione per il Master in Ingegneria dell'Informazione per la Medicina Digitale?",
+            "Qual è il programma del corso di Ingegneria del Software?",
+            "Quali sono gli orari di ricevimento del Professor Capuano?",
+            "Dove si trova l'aula 126?",
+            "La mia media è 28,8. Qual è il voto finale massimo che posso ottenere?",
+            "Chi è responsabile dell'internazionalizzazione presso DIEM?",
+            "Quali opportunità di mobilità internazionale sono disponibili?",
+            "Dove si trova il DIEM?",
+            "Quali aree di ricerca sono attive al DIEM?",
+            "Quali laboratori sono disponibili al DIEM?",
+            "Quali attrezzature sono disponibili nel Laboratorio di Robotica?",
+            "Chi sono i membri della Commissione Paritaria Studenti-Docenti?"
+        ]
+        for q in sample_questions:
+            if st.button(q, use_container_width=True):
+                st.session_state.pending_question = q
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+            if msg["role"] == "assistant" and show_sources and msg.get("sources"):
+                with st.expander("📄 Fonti consultate"):
+                    for src in msg["sources"]:
+                        st.caption(f"• {src}")
 
-    # Input Utente
-    user_input = st.chat_input("Chiedimi qualcosa sul DIEM...")
+    chat_input = st.chat_input("Chiedimi qualcosa sul DIEM...")
+    user_input = None
+
+    if chat_input:
+        user_input = chat_input
+    elif hasattr(st.session_state, "pending_question") and st.session_state.pending_question:
+        user_input = st.session_state.pending_question
+        del st.session_state.pending_question
 
     if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
@@ -84,57 +105,24 @@ def main():
             st.markdown(user_input)
 
         with st.chat_message("assistant"):
-            # --- 1. LOGICA DI ROUTING ---
-            # Liste di parole chiave per forzare la ricerca (Override manuale)
-            keywords = ["aula", "dove", "chi è", "prof", "docente", "corso", "esame", "laurea", "vento", "saggese"]
-            
-            needs_rag = "NO"
-            if any(k in user_input.lower() for k in keywords):
-                needs_rag = "SÌ"
-            else:
-                # Se non ci sono keyword, chiediamo all'LLM di decidere
-                router_chain = ROUTER_PROMPT | llm | StrOutputParser()
-                decision = router_chain.invoke({"question": user_input}).strip().upper()
-                if "SÌ" in decision or "SI" in decision:
-                    needs_rag = "SÌ"
+            with st.spinner("DIEMbot sta elaborando la richiesta..."):
+                initial_state = {"question": user_input, "retry_count": 0}
+                final_state = rag_app.invoke(initial_state)
+                
+                full_response = final_state["generation"]
+                sources_list = final_state.get("sources", [])
 
-            # --- 2. ESECUZIONE RETRIEVAL (Se necessario) ---
-            context = ""
-            if needs_rag == "SÌ":
-                with st.spinner("🔍 Interrogazione database del DIEM..."):
-                    docs = retriever.retrieve(user_input)
-                    if docs:
-                        context = "\n\n".join([
-                            f"[Fonte: {d.metadata.get('source', 'N/A')}] {d.page_content}" 
-                            for d in docs
-                        ])
-                        st.caption("✅ Informazioni recuperate dal database.")
-                    else:
-                        st.caption("⚠️ Nessun documento trovato per questa query.")
-                
-                # Debug: Mostra cosa è stato trovato (opzionale)
-                if context:
-                    with st.expander("👀 Visualizza frammenti estratti (Debug)"):
-                        st.text(context)
-            else:
-                st.caption("💬 Risposta basata su conoscenza generale (No RAG).")
-
-            # --- 3. GENERAZIONE RISPOSTA FINALE ---
-            with st.spinner("✍️ Elaborazione risposta..."):
-                answer_chain = ANSWER_PROMPT | llm | StrOutputParser()
-                
-                # Eseguiamo la risposta
-                full_response = answer_chain.invoke({
-                    "question": user_input, 
-                    "context": context if context else "Nessuna informazione specifica trovata nel database."
-                })
-                
                 st.markdown(full_response)
+                
+                if show_sources and sources_list:
+                    with st.expander("📄 Fonti consultate"):
+                        for src in sources_list:
+                            st.caption(f"• {src}")
 
-            # Salva in cronologia
             st.session_state.messages.append({
-                "role": "assistant", 
-                "content": full_response
+                "role": "assistant",
+                "content": full_response,
+                "sources": sources_list
             })
 
 if __name__ == "__main__":
