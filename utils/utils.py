@@ -19,5 +19,5 @@ def format_context(docs):
     parts = []
     for i, doc in enumerate(docs):
         source = doc.metadata.get("source", "Fonte sconosciuta")
-        parts.append(f"[Documento {i+1} | Fonte: {source}]\n{doc.page_content}")
+        parts.append(f"[Fonte: {source}]\n{doc.page_content}")
     return "\n\n---\n\n".join(parts)

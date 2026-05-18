@@ -70,7 +70,7 @@ def main():
             "Quali sono gli orari di ricevimento del Professor Capuano?",
             "Dove si trova l'aula 126?",
             "La mia media è 28,8. Qual è il voto finale massimo che posso ottenere?",
-            "Chi è responsabile dell'internazionalizzazione presso DIEM?",
+            "Chi è il delegato all'Internazionalizzazione del DIEM?",
             "Quali opportunità di mobilità internazionale sono disponibili?",
             "Dove si trova il DIEM?",
             "Quali aree di ricerca sono attive al DIEM?",
