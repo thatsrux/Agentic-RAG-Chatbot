@@ -35,10 +35,14 @@ CORSI_DIEM_URLS = [
     "https://corsi.unisa.it/ingegneria-informatica",
     "https://corsi.unisa.it/electrical-engineering-for-digital-energy",
     "https://corsi.unisa.it/information-Engineering-for-digital-medicine",
-    "https://corsi.unisa.it/0650107303300001", #"https://corsi.unisa.it/ingegneria-informatica-magistrale",
-    "https://corsi.unisa.it/DOT18CK8F9",       # https://corsi.unisa.it/ingegneria-dell-informazione
+    "https://corsi.unisa.it/0650107303300001", 
+    "https://corsi.unisa.it/DOT18CK8F9",       
     "https://corsi.unisa.it/photovoltaics"
 ]
+CORSI_ALIASES = {
+    "https://corsi.unisa.it/0650107303300001": "https://corsi.unisa.it/ingegneria-informatica-magistrale",
+    "https://corsi.unisa.it/DOT18CK8F9": "https://corsi.unisa.it/ingegneria-dell-informazione"
+}
 
 # --- GESTIONE DELLO STATO (INCREMENTAL SCRAPING) ---
 
@@ -155,8 +159,20 @@ def extract_links_and_pdfs(html, current_url, start_url):
     boundary = start_url.lower().rstrip('/')
     allowed_domain = urlparse(boundary).netloc
 
+    valid_boundaries = [boundary]
+
+    for key, alias in CORSI_ALIASES.items():
+        if boundary == key.lower():
+            valid_boundaries.append(alias.lower())
+        elif boundary == alias.lower():
+            valid_boundaries.append(key.lower())
+
     for a in soup.find_all('a', href=True):
         href = a['href']
+
+        if not href or href.startswith(('javascript:', 'mailto:', 'tel:')):
+            continue
+
         if not href.startswith(('http', '/', '#')):
             href = '/' + href
 
@@ -168,7 +184,7 @@ def extract_links_and_pdfs(html, current_url, start_url):
             if link_domain == allowed_domain:
                 pdfs_to_download.append(full_url)
 
-        elif full_url.lower().startswith(boundary):  # ← confronto lowercase unificato
+        elif any(full_url.lower().startswith(b) for b in valid_boundaries):  # ← confronto lowercase unificato
             if allowed_domain == "docenti.unisa.it":
                 path_parts = [p for p in parsed.path.split('/') if p]
                 if path_parts and '.' in path_parts[0]:
