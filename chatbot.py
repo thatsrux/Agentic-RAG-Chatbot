@@ -18,7 +18,6 @@ def build_graph():
     workflow.add_node("retrieve", retrieve_node)
     workflow.add_node("grade_documents", grade_documents_node)
     workflow.add_node("generate", generate_node)
-    workflow.add_node("check_hallucination", check_hallucination_node)
     workflow.add_node("grade_answer", grade_answer_node)
     workflow.add_node("rewrite", rewrite_node)
     workflow.add_node("fallback", fallback_node)
@@ -39,13 +38,8 @@ def build_graph():
         {"generate": "generate", "rewrite": "rewrite", "fallback": "fallback"}
     )
 
-    workflow.add_edge("generate", "check_hallucination")
+    workflow.add_edge("generate", "grade_answer")
 
-    workflow.add_conditional_edges(
-        "check_hallucination", route_after_hallucination,
-        {"grade_answer": "grade_answer", "rewrite": "rewrite", "fallback": "fallback"}
-    )
-    
     workflow.add_conditional_edges(
         "grade_answer", route_after_answer,
         {"useful": END, "rewrite": "rewrite", "fallback": "fallback"}
