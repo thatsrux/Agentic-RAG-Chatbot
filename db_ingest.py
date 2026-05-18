@@ -1,6 +1,7 @@
 import pickle
 import os
 import shutil
+import re
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import MarkdownTextSplitter, RecursiveCharacterTextSplitter
@@ -25,6 +26,12 @@ PDF_CHILD_OVERLAP = 80
 PDF_PARENT_SIZE = 3000
 PDF_PARENT_OVERLAP = 300
 
+# EXCEL 
+EXCEL_CHILD_SIZE = 800
+EXCEL_CHILD_OVERLAP = 80
+EXCEL_PARENT_SIZE = 3000
+EXCEL_PARENT_OVERLAP = 300
+
 os.makedirs(VS_DIR, exist_ok=True)
 
 def get_embedding_model():
@@ -34,9 +41,31 @@ def get_embedding_model():
         model_kwargs={"device": device},
         encode_kwargs={
             "normalize_embeddings": True,
-            "batch_size": 128
+            "batch_size": 64
         }
     )
+
+def universal_markdown_cleaner(text: str) -> str:
+    """
+    Pulisce e normalizza il Markdown generato dagli scraper per 
+    aiutare il Text Splitter a tagliare nei punti giusti.
+    """
+    if not text:
+        return ""
+
+    # 1. RIMOZIONE URL (SICURA): Rimuove i link MA ignora le immagini
+    text = re.sub(r'(?<!\!)\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    
+    # 2. SALVATAGGIO TABELLE: Inserisce \n\n se una riga finisce con '|' e la successiva ha testo
+    text = re.sub(r'(\|\s*)\n([a-zA-Z0-9\[])', r'\1\n\n\2', text)
+
+    # 3. NORMALIZZAZIONE DEI TITOLI: Assicura un solo \n\n prima di un titolo
+    text = re.sub(r'\n+#+\s+', r'\n\n# ', text)
+    
+    # 4. PULIZIA FINALE: Collassa i ritorni a capo eccessivi a un massimo di due (\n\n)
+    text = re.sub(r'\n{3,}', r'\n\n', text)
+    
+    return text
 
 def main():
     if not os.path.exists(KB_FILE):
@@ -46,9 +75,21 @@ def main():
     with open(KB_FILE, "rb") as f:
         all_docs = pickle.load(f)
 
-    # Filtriamo a monte i documenti Web troppo corti 
-    web_docs = [d for d in all_docs if d.metadata.get("type") == "web" and len(d.page_content.strip()) > 100]
-    pdf_docs = [d for d in all_docs if d.metadata.get("type") == "pdf"]
+    web_docs = []
+    pdf_docs = []
+    excel_docs = []
+
+    for d in all_docs:
+        if d.metadata.get("type") == "web":
+            if len(d.page_content.strip()) > 100:
+                d.page_content = universal_markdown_cleaner(d.page_content)
+                web_docs.append(d)
+        elif d.metadata.get("type") == "pdf":
+            pdf_docs.append(d)
+        elif d.metadata.get("type") == "excel":
+            if len(d.page_content.strip()) > 50:
+                d.page_content = universal_markdown_cleaner(d.page_content)
+                excel_docs.append(d)
 
     emb = get_embedding_model()
 
@@ -139,7 +180,46 @@ def main():
         pdf_retriever.add_documents(batch)
 
     child_vs.save_local(faiss_pdf_path)
-    print("\n[FINISH] Indicizzazione FAISS completata con successo.")
+    print("\n[PDF] Indicizzazione Parent-Child completata con successo.")
+
+
+    if excel_docs:
+        print("\n[EXCEL] Inizio indicizzazione Parent-Child per i file Excel (EasyRoom)...")
+        
+        # Usiamo il MarkdownTextSplitter per non rompere le tabelle
+        excel_child_splitter = MarkdownTextSplitter(chunk_size=EXCEL_CHILD_SIZE, chunk_overlap=EXCEL_CHILD_OVERLAP)
+        excel_parent_splitter = MarkdownTextSplitter(chunk_size=EXCEL_PARENT_SIZE, chunk_overlap=EXCEL_PARENT_OVERLAP)
+
+        faiss_excel_path = os.path.join(VS_DIR, "faiss_excel_child")
+        docstore_excel_path = os.path.join(VS_DIR, "docstore_excel")
+        
+        if os.path.exists(faiss_excel_path): shutil.rmtree(faiss_excel_path)
+        if os.path.exists(docstore_excel_path): shutil.rmtree(docstore_excel_path)
+
+        excel_child_vs = FAISS.from_texts(["__dummy__"], emb)
+        excel_parent_store = create_kv_docstore(LocalFileStore(docstore_excel_path))
+
+        excel_retriever = ParentDocumentRetriever(
+            vectorstore=excel_child_vs,
+            docstore=excel_parent_store,
+            child_splitter=excel_child_splitter,
+            parent_splitter=excel_parent_splitter,
+        )
+
+        batch_size_excel = 5
+        total_excel_batches = (len(excel_docs) + batch_size_excel - 1) // batch_size_excel
+        print(f"  [EXCEL] Trovati {len(excel_docs)} documenti orario. Suddivisi in {total_excel_batches} blocchi.")
+
+        for i in range(0, len(excel_docs), batch_size_excel):
+            batch = excel_docs[i : i + batch_size_excel]
+            current_batch = (i // batch_size_excel) + 1
+            print(f"  [EXCEL] Elaborazione batch {current_batch}/{total_excel_batches}...")
+            excel_retriever.add_documents(batch)
+
+        excel_child_vs.save_local(faiss_excel_path)
+        print("\n[EXCEL] Indicizzazione completata con successo.")
+
+    print("\n[FINISH] Tutte le indicizzazioni FAISS (Web, PDF, Excel) sono state completate con successo!")
 
 if __name__ == "__main__":
     main()
