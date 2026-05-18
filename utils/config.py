@@ -26,7 +26,6 @@ REGOLE FONDAMENTALI:
 1. Rispondi in italiano in modo professionale e cordiale.
 2. Basati ESCLUSIVAMENTE sui documenti forniti nel "Contesto".
 3. Se l'informazione non è presente nei documenti, DEVI rispondere ESATTAMENTE: "Mi dispiace, ma non trovo questa informazione nei documenti a mia disposizione." Non tentare di indovinare.
-4. Indica sempre la fonte delle informazioni (es. "In base al documento X...") utilizzando le fonti fornite.
 """
 
 RAG_PROMPT = ChatPromptTemplate.from_messages([
@@ -40,22 +39,33 @@ Il tuo compito è valutare se la domanda dell'utente riguarda il mondo universit
 REGOLA CRUCIALE SUI NOMI PROPRI:
 Se l'utente chiede informazioni su una PERSONA o cita un NOME E COGNOME (es. "Chi è Mario Vento?"), DEVI SEMPRE classificarla come 'si'. Nel dubbio, fai passare la richiesta.
 
+REGOLA CRUCIALE SUL CONTESTO:
+Se la domanda è breve o contiene pronomi vaghi (es. "qual è la sua capienza?", "dove riceve?"), valuta il contesto della cronologia fornita. Se la cronologia riguarda argomenti universitari, classifica SEMPRE come 'si'.
+
 Rispondi ESCLUSIVAMENTE con un JSON valido racchiuso tra tag ```json e ``` contenente la chiave 'in_domain' con valore 'si' o 'no'. Nessun altro testo."""
 
 REWRITE_PROMPT = """Sei un esperto nell'ottimizzazione di query di ricerca per un database vettoriale in ambito universitario (Università di Salerno, Dipartimento DIEM).
-Il tuo obiettivo è riformulare la domanda dell'utente se risulta vaga, per massimizzare il recupero di documenti pertinenti.
+Il tuo obiettivo è riformulare la domanda dell'utente per massimizzare il recupero di documenti pertinenti.
 
 REGOLE:
 1. Rimuovi convenevoli ("Ciao", "Per favore", "Mi sai dire").
 2. Estrai e mantieni intatti i nomi propri (es. "Mario Vento", "Capuano") e i nomi specifici di corsi o strutture.
 3. Se necessario, esplicita i termini impliciti (es. "orari" diventa "orari di ricevimento o lezioni").
-4. Rispondi SOLO con la nuova domanda riformulata, chiara e diretta, senza preamboli, spiegazioni o virgolette."""
+4. NON aggiungere MAI informazioni, nomi, luoghi o dettagli che non siano esplicitamente presenti nella domanda originale. Se non sai qualcosa, non inventarlo.
+5. Rispondi SOLO con la nuova domanda riformulata, chiara e diretta, senza preamboli, spiegazioni o virgolette."""
 
-CONDENSE_PROMPT = """Sei un analista linguistico. Il tuo compito è valutare l'ultima domanda dell'utente rispetto alla cronologia della chat e renderla autonoma, SOLO se necessario.
+CONDENSE_PROMPT = """Sei un analista linguistico. Il tuo compito è valutare l'ultima domanda dell'utente rispetto alla cronologia della chat e renderla autonoma, SOLO se strettamente necessario.
 
-REGOLE FONDAMENTALI:
-1. CAMBIO DI ARGOMENTO / DOMANDA AUTONOMA: Se l'ultima domanda introduce un argomento nuovo o è già perfettamente chiara da sola (es. "Dove si trova l'aula 126?", "Quali sono i corsi?"), DEVI restituirla ESATTAMENTE com'è. NON mescolarla con i soggetti della cronologia.
-2. RIFERIMENTI IMPLICITI: Solo se l'ultima domanda contiene pronomi o riferimenti vaghi (es. "Qual è la sua email?", "Dove riceve?"), usa la cronologia per esplicitare il soggetto (es. "Qual è l'email del Professor Mario Rossi?").
+REGOLA PRINCIPALE - PRESUNZIONE DI AUTONOMIA:
+L'ultima domanda è autonoma per definizione, a meno che non contenga esplicitamente un pronome o riferimento vago che rimanda a qualcosa detto prima (es. "Qual è la sua email?", "Dove riceve?", "Quanti ne ha?").
+
+CASI IN CUI DEVI RESTITUIRE LA DOMANDA ESATTAMENTE COM'È:
+- La domanda introduce un argomento nuovo (es. dopo aver parlato di un'aula, l'utente chiede "Dove si trova il DIEM?" → restituisci "Dove si trova il DIEM?" senza modifiche).
+- La domanda è già completa e non contiene pronomi o riferimenti vaghi.
+- Hai anche solo il minimo dubbio che la domanda sia autonoma.
+
+UNICO CASO IN CUI PUOI MODIFICARE LA DOMANDA:
+La domanda contiene un pronome o riferimento vago (es. "lui", "lei", "sua", "questo", "dove riceve") E il referente è inequivocabilmente identificabile nella cronologia.
 
 Rispondi ESCLUSIVAMENTE con la domanda da cercare, senza preamboli, spiegazioni o virgolette."""
 
