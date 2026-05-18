@@ -71,7 +71,6 @@ def main():
 
     web_docs = []
     pdf_docs = []
-    excel_docs = []
 
     for d in all_docs:
         if d.metadata.get("type") == "web":
@@ -80,10 +79,6 @@ def main():
                 web_docs.append(d)
         elif d.metadata.get("type") == "pdf":
             pdf_docs.append(d)
-        elif d.metadata.get("type") == "excel":
-            if len(d.page_content.strip()) > 50:
-                d.page_content = universal_markdown_cleaner(d.page_content)
-                excel_docs.append(d)
 
     emb = get_embedding_model()
 
@@ -174,46 +169,7 @@ def main():
         pdf_retriever.add_documents(batch)
 
     child_vs.save_local(faiss_pdf_path)
-    print("\n[PDF] Indicizzazione Parent-Child completata con successo.")
-
-
-    if excel_docs:
-        print("\n[EXCEL] Inizio indicizzazione Parent-Child per i file Excel (EasyRoom)...")
-        
-        # Usiamo il MarkdownTextSplitter per non rompere le tabelle
-        excel_child_splitter = MarkdownTextSplitter(chunk_size=800, chunk_overlap=80)
-        excel_parent_splitter = MarkdownTextSplitter(chunk_size=3000, chunk_overlap=300)
-
-        faiss_excel_path = os.path.join(VS_DIR, "faiss_excel_child")
-        docstore_excel_path = os.path.join(VS_DIR, "docstore_excel")
-        
-        if os.path.exists(faiss_excel_path): shutil.rmtree(faiss_excel_path)
-        if os.path.exists(docstore_excel_path): shutil.rmtree(docstore_excel_path)
-
-        excel_child_vs = FAISS.from_texts(["__dummy__"], emb)
-        excel_parent_store = create_kv_docstore(LocalFileStore(docstore_excel_path))
-
-        excel_retriever = ParentDocumentRetriever(
-            vectorstore=excel_child_vs,
-            docstore=excel_parent_store,
-            child_splitter=excel_child_splitter,
-            parent_splitter=excel_parent_splitter,
-        )
-
-        batch_size_excel = 5
-        total_excel_batches = (len(excel_docs) + batch_size_excel - 1) // batch_size_excel
-        print(f"  [EXCEL] Trovati {len(excel_docs)} documenti orario. Suddivisi in {total_excel_batches} blocchi.")
-
-        for i in range(0, len(excel_docs), batch_size_excel):
-            batch = excel_docs[i : i + batch_size_excel]
-            current_batch = (i // batch_size_excel) + 1
-            print(f"  [EXCEL] Elaborazione batch {current_batch}/{total_excel_batches}...")
-            excel_retriever.add_documents(batch)
-
-        excel_child_vs.save_local(faiss_excel_path)
-        print("\n[EXCEL] Indicizzazione completata con successo.")
-
-    print("\n[FINISH] Tutte le indicizzazioni FAISS (Web, PDF, Excel) sono state completate con successo!")
+    print("\n[FINISH] Indicizzazione FAISS completata con successo.")
 
 if __name__ == "__main__":
     main()
