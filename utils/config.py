@@ -9,10 +9,13 @@ MAX_RETRIES = 2
 
 class RAGState(TypedDict):
     question: str
+    chat_history: str
     context: str
     sources: List[str]
     generation: str
-    grade: str
+    doc_grade: str
+    hallucination_grade: str
+    answer_grade: str
     retry_count: int
     is_in_domain: str
 
@@ -37,12 +40,47 @@ Il tuo compito è valutare se la domanda dell'utente riguarda il mondo universit
 REGOLA CRUCIALE SUI NOMI PROPRI:
 Se l'utente chiede informazioni su una PERSONA o cita un NOME E COGNOME (es. "Chi è Mario Vento?"), DEVI SEMPRE classificarla come 'si'. Nel dubbio, fai passare la richiesta.
 
-Rispondi ESCLUSIVAMENTE con un JSON valido racchiuso tra tag ```json e ``` contenente la chiave 'in_domain' con valore 'si' o 'no'."""
+Rispondi ESCLUSIVAMENTE con un JSON valido racchiuso tra tag ```json e ``` contenente la chiave 'in_domain' con valore 'si' o 'no'. Nessun altro testo."""
 
-GRADER_PROMPT = """Sei un valutatore esperto. Il tuo compito è verificare se una risposta è:
-1. Fondata esclusivamente sul contesto fornito (niente allucinazioni).
-2. Utile a risolvere la domanda dell'utente.
+REWRITE_PROMPT = """Sei un esperto nell'ottimizzazione di query di ricerca per un database vettoriale in ambito universitario (Università di Salerno, Dipartimento DIEM).
+Il tuo obiettivo è riformulare la domanda dell'utente se risulta vaga, per massimizzare il recupero di documenti pertinenti.
 
-Rispondi esclusivamente con un JSON racchiuso tra tag ```json e ``` contenente la chiave 'binary_score' con valore 'si' o 'no'."""
+REGOLE:
+1. Rimuovi convenevoli ("Ciao", "Per favore", "Mi sai dire").
+2. Estrai e mantieni intatti i nomi propri (es. "Mario Vento", "Capuano") e i nomi specifici di corsi o strutture.
+3. Se necessario, esplicita i termini impliciti (es. "orari" diventa "orari di ricevimento o lezioni").
+4. Rispondi SOLO con la nuova domanda riformulata, chiara e diretta, senza preamboli, spiegazioni o virgolette."""
 
-REWRITE_PROMPT = "Sei un esperto nell'ottimizzare le query di ricerca per un database vettoriale. Analizza la domanda dell'utente e riscrivila in modo più chiaro e semplice, estraendo le parole chiave principali. Rispondi SOLO con la nuova domanda, senza preamboli."
+CONDENSE_PROMPT = """Sei un analista linguistico. Il tuo compito è valutare l'ultima domanda dell'utente rispetto alla cronologia della chat e renderla autonoma, SOLO se necessario.
+
+REGOLE FONDAMENTALI:
+1. CAMBIO DI ARGOMENTO / DOMANDA AUTONOMA: Se l'ultima domanda introduce un argomento nuovo o è già perfettamente chiara da sola (es. "Dove si trova l'aula 126?", "Quali sono i corsi?"), DEVI restituirla ESATTAMENTE com'è. NON mescolarla con i soggetti della cronologia.
+2. RIFERIMENTI IMPLICITI: Solo se l'ultima domanda contiene pronomi o riferimenti vaghi (es. "Qual è la sua email?", "Dove riceve?"), usa la cronologia per esplicitare il soggetto (es. "Qual è l'email del Professor Mario Rossi?").
+
+Rispondi ESCLUSIVAMENTE con la domanda da cercare, senza preamboli, spiegazioni o virgolette."""
+
+DOC_GRADER_PROMPT = """Sei un valutatore per un sistema documentale universitario.
+Il tuo compito è leggere il 'Contesto' estratto e determinare se contiene informazioni pertinenti per rispondere alla 'Domanda'.
+
+REGOLE:
+- Rispondi 'si' se il contesto contiene almeno un'informazione utile correlata alla domanda.
+- Rispondi 'no' se il contesto è completamente irrilevante.
+
+Rispondi ESCLUSIVAMENTE con un JSON valido racchiuso tra tag ```json e ``` contenente la chiave 'binary_score' con valore 'si' o 'no'. Nessun altro testo."""
+
+HALLUCINATION_GRADER_PROMPT = """Sei un revisore di bozze specializzato nel rilevare allucinazioni dell'IA.
+Devi verificare se la 'Generazione' è interamente supportata dal 'Contesto' fornito.
+
+REGOLE:
+- Rispondi 'si' (Grounded): la generazione si basa sui fatti del contesto e non inventa nulla.
+- Rispondi 'no' (Hallucination): la generazione contiene affermazioni, numeri o fatti NON presenti nel contesto.
+
+Rispondi ESCLUSIVAMENTE con un JSON valido racchiuso tra tag ```json e ``` contenente la chiave 'binary_score' con valore 'si' o 'no'. Nessun altro testo."""
+
+ANSWER_GRADER_PROMPT = """Sei un valutatore di qualità. Devi verificare se la 'Generazione' risponde in modo soddisfacente alla 'Domanda' dell'utente.
+
+REGOLE:
+- Rispondi 'si': la generazione risolve il quesito o spiega correttamente che l'informazione manca nei documenti.
+- Rispondi 'no': la generazione elude la domanda o è confusa.
+
+Rispondi ESCLUSIVAMENTE con un JSON valido racchiuso tra tag ```json e ``` contenente la chiave 'binary_score' con valore 'si' o 'no'. Nessun altro testo."""

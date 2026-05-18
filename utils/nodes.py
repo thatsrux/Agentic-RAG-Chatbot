@@ -1,7 +1,7 @@
 import streamlit as st
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from utils.config import RAGState, RAG_PROMPT, DOMAIN_PROMPT, GRADER_PROMPT, REWRITE_PROMPT, MAX_RETRIES
+from utils.config import *
 from utils.utils import load_llm, format_context
 
 def domain_guard_node(state: RAGState):
@@ -30,11 +30,30 @@ def domain_guard_node(state: RAGState):
         
     return {"is_in_domain": "si"}
 
+def condense_question_node(state: RAGState):
+    question = state["question"]
+    chat_history = state.get("chat_history", "")
+    
+    if not chat_history.strip():
+        return {"question": question} # Nessuna cronologia, salta
+        
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", CONDENSE_PROMPT),
+        ("human", f"Cronologia:\n{chat_history}\n\nUltima domanda: {question}")
+    ])
+    
+    new_question = (prompt | load_llm() | StrOutputParser()).invoke({})
+
+    if new_question.strip() != question.strip():
+        st.toast(f"🧠 Domanda contestualizzata: {new_question}", icon="🔗")
+
+    return {"question": new_question}
+
 def retrieve_node(state: RAGState):
     question = state["question"]
     docs = st.session_state.retriever.retrieve(question)
 
-    with st.expander("🛠️ DEBUG: Ispeziona i Chunk estratti", expanded=False):
+    with st.expander("📄 Chunk recuperati", expanded=False):
         if not docs:
             st.warning("Nessun documento recuperato.")
         else:
@@ -46,26 +65,53 @@ def retrieve_node(state: RAGState):
     sources = list(set([d.metadata.get("source", "N/A") for d in docs]))
     return {"context": context, "sources": sources}
 
-def generate_node(state: RAGState):
-    chain = RAG_PROMPT | load_llm() | StrOutputParser()
-    response = chain.invoke({"context": state["context"], "question": state["question"]})
-    return {"generation": response}
-
-def grade_generation_node(state: RAGState):
+def grade_documents_node(state: RAGState):
     prompt = ChatPromptTemplate.from_messages([
-        ("system", GRADER_PROMPT),
-        ("human", f"Contesto: {state['context']}\n\nRisposta da valutare: {state['generation']}\n\nDomanda utente: {state['question']}")
+        ("system", DOC_GRADER_PROMPT),
+        ("human", f"Contesto:\n{state['context']}\n\nDomanda:\n{state['question']}")
     ])
-    
     chain = prompt | load_llm() | JsonOutputParser()
     
     try:
         score = chain.invoke({})
         grade = score.get("binary_score", "no").lower()
     except Exception:
-        grade = "no"
+        grade = "si"
 
-    return {"grade": grade}
+    return {"doc_grade": grade}
+
+def generate_node(state: RAGState):
+    chain = RAG_PROMPT | load_llm() | StrOutputParser()
+    response = chain.invoke({"context": state["context"], "question": state["question"]})
+    return {"generation": response}
+
+def check_hallucination_node(state: RAGState):
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", HALLUCINATION_GRADER_PROMPT),
+        ("human", f"Contesto: {state['context']}\n\nGenerazione: {state['generation']}")
+    ])
+    chain = prompt | load_llm() | JsonOutputParser()
+    
+    try:
+        score = chain.invoke({})
+        grade = score.get("binary_score", "no").lower()
+    except Exception:
+        grade = "si" 
+    return {"hallucination_grade": grade}
+
+def grade_answer_node(state: RAGState):
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", ANSWER_GRADER_PROMPT),
+        ("human", f"Domanda: {state['question']}\n\nGenerazione: {state['generation']}")
+    ])
+    chain = prompt | load_llm() | JsonOutputParser()
+    
+    try:
+        score = chain.invoke({})
+        grade = score.get("binary_score", "no").lower()
+    except Exception:
+        grade = "si"
+    return {"answer_grade": grade}
 
 def rewrite_node(state: RAGState):
     current_retries = state.get("retry_count", 0)
@@ -85,11 +131,20 @@ def fallback_node(state: RAGState):
         "sources": []
     }
 
-# --- FUNZIONI DI ROUTING ---
 def route_after_domain(state: RAGState):
     return "out_of_domain" if state.get("is_in_domain") == "no" else "in_domain"
 
-def route_after_grade(state: RAGState):
-    if state.get("grade") == "si":
+def route_after_doc_grade(state: RAGState):
+    if state.get("doc_grade") == "si":
+        return "generate"
+    return "rewrite" if state.get("retry_count", 0) < MAX_RETRIES else "fallback"
+
+def route_after_hallucination(state: RAGState):
+    if state.get("hallucination_grade") == "si":
+        return "grade_answer"
+    return "rewrite" if state.get("retry_count", 0) < MAX_RETRIES else "fallback"
+
+def route_after_answer(state: RAGState):
+    if state.get("answer_grade") == "si":
         return "useful"
-    return "rewrite" if state.get("retry_count", 0) < MAX_RETRIES else "max_retries"
+    return "rewrite" if state.get("retry_count", 0) < MAX_RETRIES else "fallback"
