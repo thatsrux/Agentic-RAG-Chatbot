@@ -30,7 +30,6 @@ def condense_question_node(state: RAGState):
     chat_history = state.get("chat_history", "")
     _sep(CYAN, "CONDENSE QUESTION")
     _log(CYAN, "CONDENSE", f"INPUT  question     : {question}")
-    _log(CYAN, "CONDENSE", f"INPUT  chat_history : '{chat_history}'")
 
     if not chat_history.strip():
         _log(CYAN, "CONDENSE", "Nessuna history → skip LLM")
@@ -40,13 +39,25 @@ def condense_question_node(state: RAGState):
         ("system", CONDENSE_PROMPT),
         ("human", f"Cronologia:\n{chat_history}\n\nUltima domanda: {question}")
     ])
-    new_question = (prompt | load_llm() | StrOutputParser()).invoke({})
-    _log(CYAN, "CONDENSE", f"OUTPUT new_question : {new_question}")
+    
+    chain = prompt | load_llm() | JsonOutputParser()
 
-    if new_question.strip() != question.strip():
-        st.toast(f"🧠 Domanda contestualizzata: {new_question}", icon="🔗")
+    try:
+        result = chain.invoke({})
+        needs_context = result.get("needs_context", False)
 
-    return {"question": new_question}
+        if needs_context:
+            new_question = result.get("rewritten_query", question)
+            st.toast(f"🧠 Domanda contestualizzata: {new_question}", icon="🔗")
+            _log(CYAN, "CONDENSE", f"OUTPUT rewritten : {new_question}")
+            return {"question": new_question}
+        else:
+            _log(CYAN, "CONDENSE", "Domanda autonoma → passo la stringa inalterata")
+            return {"question": question}
+            
+    except Exception as e:
+        _log(CYAN, "CONDENSE", f"Errore parser JSON → passo la stringa inalterata. Dettagli: {e}")
+        return {"question": question}
 
 
 def domain_guard_node(state: RAGState):
@@ -131,24 +142,6 @@ def generate_node(state: RAGState):
     return {"generation": response}
 
 
-def check_hallucination_node(state: RAGState):
-    _sep(WHITE, "HALLUCINATION CHECK")
-    _log(WHITE, "HALLUCINATION", f"INPUT  generation (300 car): {state['generation'][:300]}")
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", HALLUCINATION_GRADER_PROMPT),
-        ("human", f"Contesto: {state['context']}\n\nGenerazione: {state['generation']}")
-    ])
-    chain = prompt | load_llm() | JsonOutputParser()
-    try:
-        score = chain.invoke({})
-        grade = score.get("binary_score", "no").lower()
-    except Exception:
-        grade = "si"
-
-    _log(WHITE, "HALLUCINATION", f"OUTPUT grade : {grade}")
-    return {"hallucination_grade": grade}
-
-
 def grade_answer_node(state: RAGState):
     _sep(ORANGE, "ANSWER GRADE")
     _log(ORANGE, "ANSWER_GRADE", f"INPUT  question            : {state['question']}")
@@ -204,14 +197,6 @@ def route_after_doc_grade(state: RAGState):
     else:
         result = "rewrite" if state.get("retry_count", 0) < MAX_RETRIES else "fallback"
     print(f"{BOLD}{GRAY}[ROUTE] after_doc_grade → {result}  (retry_count={state.get('retry_count', 0)}){RESET}")
-    return result
-
-def route_after_hallucination(state: RAGState):
-    if state.get("hallucination_grade") == "si":
-        result = "grade_answer"
-    else:
-        result = "rewrite" if state.get("retry_count", 0) < MAX_RETRIES else "fallback"
-    print(f"{BOLD}{GRAY}[ROUTE] after_hallucination → {result}  (retry_count={state.get('retry_count', 0)}){RESET}")
     return result
 
 def route_after_answer(state: RAGState):

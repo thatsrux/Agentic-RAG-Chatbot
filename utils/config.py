@@ -14,7 +14,6 @@ class RAGState(TypedDict):
     sources: List[str]
     generation: str
     doc_grade: str
-    hallucination_grade: str
     answer_grade: str
     retry_count: int
     is_in_domain: str
@@ -36,6 +35,8 @@ RAG_PROMPT = ChatPromptTemplate.from_messages([
 DOMAIN_PROMPT = """Sei un filtro di sicurezza per DIEMbot, l'assistente dell'Università di Salerno.
 Il tuo compito è valutare se la domanda dell'utente riguarda il mondo universitario, il dipartimento DIEM, la didattica, la ricerca o i servizi dell'ateneo.
 
+REGOLA CRUCIALE SULL'AMBITO DIDATTICO:
+Tutte le domande riguardanti voti, calcolo del voto di laurea, medie ponderate, esami, CFU, immatricolazioni, tasse o carriere studentesche sono da considerarsi IN DOMINIO. Rispondi 'si'.
 REGOLA CRUCIALE SUI NOMI PROPRI:
 Se l'utente chiede informazioni su una PERSONA o cita un NOME E COGNOME (es. "Chi è Mario Vento?"), DEVI SEMPRE classificarla come 'si'. Nel dubbio, fai passare la richiesta.
 
@@ -44,46 +45,35 @@ Se la domanda è breve o contiene pronomi vaghi (es. "qual è la sua capienza?",
 
 Rispondi ESCLUSIVAMENTE con un JSON valido racchiuso tra tag ```json e ``` contenente la chiave 'in_domain' con valore 'si' o 'no'. Nessun altro testo."""
 
-REWRITE_PROMPT = """Sei un esperto nell'ottimizzazione di query di ricerca per un database vettoriale in ambito universitario (Università di Salerno, Dipartimento DIEM).
-Il tuo obiettivo è riformulare la domanda dell'utente per massimizzare il recupero di documenti pertinenti.
+REWRITE_PROMPT = """Sei un ottimizzatore rigido di query per un database vettoriale universitario.
+Il tuo UNICO compito è riformulare la domanda che ha fallito la ricerca per migliorarne la reperibilità, SENZA MAI alterarne il senso originale o inventare concetti.
 
-REGOLE:
-1. Rimuovi convenevoli ("Ciao", "Per favore", "Mi sai dire").
-2. Estrai e mantieni intatti i nomi propri (es. "Mario Vento", "Capuano") e i nomi specifici di corsi o strutture.
-3. Se necessario, esplicita i termini impliciti (es. "orari" diventa "orari di ricevimento o lezioni").
-4. NON aggiungere MAI informazioni, nomi, luoghi o dettagli che non siano esplicitamente presenti nella domanda originale. Se non sai qualcosa, non inventarlo.
-5. Rispondi SOLO con la nuova domanda riformulata, chiara e diretta, senza preamboli, spiegazioni o virgolette."""
+REGOLE TASSATIVE:
+1. NON aggiungere MAI argomenti generali se la domanda è specifica (es. NON trasformare un calcolo del voto in "qual è la scala di valutazione").
+2. Mantieni inalterati i dati numerici e le parole chiave principali (es. "media", "28,8", "voto massimo").
+3. Limitati a ripulire la frase da convenevoli o a sostituire i verbi con sinonimi più diretti e focalizzati sulla ricerca (es. "che si può raggiungere" diventa "calcolo", o "ottenere").
+4. Rispondi ESCLUSIVAMENTE con la nuova query pulita, senza preamboli, spiegazioni o virgolette."""
 
-CONDENSE_PROMPT = """Sei un analista linguistico. Il tuo compito è valutare l'ultima domanda dell'utente rispetto alla cronologia della chat e renderla autonoma, SOLO se strettamente necessario.
+CONDENSE_PROMPT = """Sei un analista linguistico. Il tuo UNICO compito è capire se l'ultima domanda dell'utente ha un soggetto sottinteso che richiede la cronologia per essere compresa.
 
-REGOLA PRINCIPALE - PRESUNZIONE DI AUTONOMIA:
-L'ultima domanda è autonoma per definizione, a meno che non contenga esplicitamente un pronome o riferimento vago che rimanda a qualcosa detto prima (es. "Qual è la sua email?", "Dove riceve?", "Quanti ne ha?").
+REGOLE FONDAMENTALI:
+1. CAMBIO ARGOMENTO = NESSUN CONTESTO: Se l'utente fa una domanda su un argomento nuovo rispetto alla cronologia (es. prima parlava di voti e ora di aule), la domanda è autonoma. Rispondi "needs_context": false.
+2. SOGGETTO ESPLICITO: Se la domanda è già chiara (es. "Dove si trova l'aula 126?", "Chi è Mario Vento?"), rispondi "needs_context": false.
+3. QUANDO RISPONDERE TRUE: Solo se ci sono pronomi o soggetti assenti (es. "Qual è la sua email?", "Quando riceve?").
+4. COME RISCRIVERE: Se "needs_context" è true, in "rewritten_query" devi scrivere SOLO ed ESCLUSIVAMENTE la domanda neutra con il soggetto esplicitato (es. "Qual è l'email di Mario Vento?"). È SEVERAMENTE VIETATO aggiungere frasi come "Considerando la precedente...", "In base a...", o altre spiegazioni.
 
-CASI IN CUI DEVI RESTITUIRE LA DOMANDA ESATTAMENTE COM'È:
-- La domanda introduce un argomento nuovo (es. dopo aver parlato di un'aula, l'utente chiede "Dove si trova il DIEM?" → restituisci "Dove si trova il DIEM?" senza modifiche).
-- La domanda è già completa e non contiene pronomi o riferimenti vaghi.
-- Hai anche solo il minimo dubbio che la domanda sia autonoma.
-
-UNICO CASO IN CUI PUOI MODIFICARE LA DOMANDA:
-La domanda contiene un pronome o riferimento vago (es. "lui", "lei", "sua", "questo", "dove riceve") E il referente è inequivocabilmente identificabile nella cronologia.
-
-Rispondi ESCLUSIVAMENTE con la domanda da cercare, senza preamboli, spiegazioni o virgolette."""
-
+Rispondi ESCLUSIVAMENTE con un JSON valido con questa struttura:
+{{
+    "needs_context": true o false,
+    "rewritten_query": "la domanda pulita e oggettiva (lascia vuoto se needs_context è false)"
+}}
+Nessun altro testo."""
 DOC_GRADER_PROMPT = """Sei un valutatore per un sistema documentale universitario.
 Il tuo compito è leggere il 'Contesto' estratto e determinare se contiene informazioni pertinenti per rispondere alla 'Domanda'.
 
 REGOLE:
 - Rispondi 'si' se il contesto contiene almeno un'informazione utile correlata alla domanda.
 - Rispondi 'no' se il contesto è completamente irrilevante.
-
-Rispondi ESCLUSIVAMENTE con un JSON valido racchiuso tra tag ```json e ``` contenente la chiave 'binary_score' con valore 'si' o 'no'. Nessun altro testo."""
-
-HALLUCINATION_GRADER_PROMPT = """Sei un revisore di bozze specializzato nel rilevare allucinazioni dell'IA.
-Devi verificare se la 'Generazione' è interamente supportata dal 'Contesto' fornito.
-
-REGOLE:
-- Rispondi 'si' (Grounded): la generazione si basa sui fatti del contesto e non inventa nulla.
-- Rispondi 'no' (Hallucination): la generazione contiene affermazioni, numeri o fatti NON presenti nel contesto.
 
 Rispondi ESCLUSIVAMENTE con un JSON valido racchiuso tra tag ```json e ``` contenente la chiave 'binary_score' con valore 'si' o 'no'. Nessun altro testo."""
 
