@@ -1,7 +1,9 @@
 #general
 __pycache__/
+log.txt
 
 # Ignore database files
 knowledge/
+knowledge_old/
 
 llm_env/
