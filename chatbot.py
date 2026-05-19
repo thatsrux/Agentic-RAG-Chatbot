@@ -12,41 +12,27 @@ os.environ["OMP_NUM_THREADS"] = "1"
 def build_graph():
     workflow = StateGraph(RAGState)
 
-    # Aggiungi i nodi
+    # 1. Aggiungi SOLO i nodi essenziali
     workflow.add_node("condense_question", condense_question_node)
     workflow.add_node("domain_guard", domain_guard_node)
     workflow.add_node("retrieve", retrieve_node)
-    workflow.add_node("grade_documents", grade_documents_node)
     workflow.add_node("generate", generate_node)
-    workflow.add_node("grade_answer", grade_answer_node)
-    workflow.add_node("rewrite", rewrite_node)
-    workflow.add_node("fallback", fallback_node)
 
-    # Definisci il flusso
+    # 2. Definisci il flusso
     workflow.add_edge(START, "condense_question")
     workflow.add_edge("condense_question", "domain_guard")
 
+    # Guard: se è fuori dominio termina, altrimenti recupera
     workflow.add_conditional_edges(
         "domain_guard", route_after_domain,
         {"in_domain": "retrieve", "out_of_domain": END}
     )
     
-    workflow.add_edge("retrieve", "grade_documents")
+    # Dal retrieve passiamo DIRETTAMENTE alla generazione
+    workflow.add_edge("retrieve", "generate")
     
-    workflow.add_conditional_edges(
-        "grade_documents", route_after_doc_grade,
-        {"generate": "generate", "rewrite": "rewrite", "fallback": "fallback"}
-    )
-
-    workflow.add_edge("generate", "grade_answer")
-
-    workflow.add_conditional_edges(
-        "grade_answer", route_after_answer,
-        {"useful": END, "rewrite": "rewrite", "fallback": "fallback"}
-    )
-
-    workflow.add_edge("rewrite", "retrieve")
-    workflow.add_edge("fallback", END)
+    # La generazione è lo step finale
+    workflow.add_edge("generate", END)
 
     return workflow.compile()
 
