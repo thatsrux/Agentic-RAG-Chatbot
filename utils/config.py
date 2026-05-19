@@ -4,7 +4,8 @@ from langchain_core.prompts import ChatPromptTemplate
 import torch
 device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
-OLLAMA_MODEL = "llama3.1"
+#OLLAMA_MODEL = "llama3.1"
+OLLAMA_MODEL = "mistral-nemo"
 MAX_RETRIES = 2
 
 class RAGState(TypedDict):
@@ -44,43 +45,17 @@ REGOLE:
 
 Rispondi ESCLUSIVAMENTE si o no"""
 
-REWRITE_PROMPT = """Sei un estrattore di parole chiave. Trasforma questa domanda in una stringa di ricerca per un database.
-Togli i convenevoli. Togli le parole inutili. Mantieni solo nomi, concetti e numeri fondamentali.
-NON rispondere all'utente. Rispondi ESCLUSIVAMENTE con le parole chiave estratte."""
-
-CONDENSE_PROMPT = """Sei un modulo di elaborazione testuale. Il tuo unico compito è rendere l'Ultima Domanda indipendente, sostituendo i pronomi con il nome corretto preso dalla Cronologia.
+CONDENSE_PROMPT = """Sei un ottimizzatore di query di ricerca.
+Data la cronologia della conversazione e l'ultima domanda dell'utente, il tuo compito è riscrivere la domanda per renderla autonoma.
 
 REGOLE TASSATIVE:
-1. DIVIETO DI SOVRASCRITTURA: Se l'Ultima Domanda è già chiara o contiene un soggetto esplicito (es. una sigla come "DIEM", un nome, un luogo, un aula specifica), NON DEVI MAI sostituirlo con quello della cronologia. Copiala e incollala IDENTICA in ogni sua parola e punteggiatura.
-2. Se l'Ultima Domanda contiene pronomi ("suo", "sua", "lo", "la") o omette il soggetto, INSERISCI il soggetto preso dalla Cronologia. Dai priorità assoluta al soggetto menzionato nell'ULTIMO turno di conversazione, procedendo a ritroso (dal più recente al più vecchio) solo se necessario.
-3. NON CANCELLARE L'ARGOMENTO: Se l'Ultima Domanda chiede il "curriculum" o gli "orari", la tua risposta DEVE contenere la parola "curriculum" o "orari". Non trasformare la frase in un semplice "Chi è [Nome]?".
-4. NON TAGLIARE LE PREMESSE: Se l'Ultima Domanda è composta da più frasi, contiene numeri, dati o affermazioni iniziali, DEVI conservare l'intero testo originario. Non estrarre solo la parte col punto interrogativo.
-5. NON INVENTARE NOMI. Se devi aggiungere un soggetto utilizza SOLTANTO i nomi presenti nella Cronologia.
+1. Se la 'Ultima domanda' è chiara, esplicita e non contiene pronomi o riferimenti impliciti alla cronologia, DEVI copiare e restituire la domanda testualmente, senza alcuna modifica.
+2. Mantieni la lingua originale della domanda.
+3. NON aggiungere informazioni extra, indirizzi, espansioni di acronimi o dettagli che non erano presenti nella domanda dell'utente.
 
-ESEMPI:
-Cronologia: "Chi è il prof [Nome]?"
-Ultima Domanda: "Qual è il suo curriculum?"
-Risultato: Qual è il curriculum del prof [Nome]?
+Cronologia della conversazione:
+{history}
 
-Cronologia: "Dove si trova l'Aula [X]?"
-Ultima Domanda: "Quanti posti ha?"
-Risultato: Quanti posti ha l'Aula [X]?
+Ultima domanda: {query}
 
-Cronologia: "Dove si trova l'Aula [X]?"
-Ultima Domanda: "Dove si trova il [Luogo Y]?"
-Risultato: Dove si trova il [Luogo Y]?
-
-Cronologia: "Chi è il prof [Nome]?"
-Ultima Domanda: "Chi è il direttore del DIEM?"
-Risultato: Chi è il direttore del DIEM?
-
-REGOLE DI OUTPUT TASSATIVE:
-- NON RISPONDERE MAI ALLA DOMANDA dell'utente.
-- NON usare MAI frasi di rifiuto, scuse o conversazione (es. "Non posso fornire...", "Ecco la domanda:").
-- Rispondi SOLO ed ESCLUSIVAMENTE con la nuda stringa della domanda riformulata finale, senza un singolo carattere prima o dopo."""
-
-DOC_GRADER_PROMPT = """Il seguente 'Contesto' contiene informazioni utili per rispondere alla 'Domanda'?
-Rispondi ESCLUSIVAMENTE con la parola "SI" oppure "NO". Niente altro."""
-
-ANSWER_GRADER_PROMPT = """La seguente 'Generazione' risponde in modo sensato alla 'Domanda'?
-Rispondi ESCLUSIVAMENTE con la parola "SI" oppure "NO". Niente altro."""
+Query riscritta:"""
