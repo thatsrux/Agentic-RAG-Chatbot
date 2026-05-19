@@ -45,14 +45,15 @@ REGOLE:
 
 Rispondi ESCLUSIVAMENTE si o no"""
 
-CONDENSE_PROMPT = """Sei un ottimizzatore di query di ricerca. 
-L'utente sta parlando con l'assistente virtuale del DIEM. Il database contiene GIA' E SOLO documenti del DIEM.
+CONDENSE_PROMPT = """Sei un risolutore di coreferenze e ottimizzatore di query.
+L'utente sta parlando con l'assistente del DIEM. Il database contiene SOLO documenti del DIEM.
 
 REGOLE TASSATIVE:
-1. NESSUN CONTESTO AGGIUNTIVO: È SEVERAMENTE VIETATO aggiungere frasi come "al DIEM", "del Dipartimento...", "all'Università di Salerno". Queste aggiunte danneggiano la ricerca.
-2. DOMANDE GIA' COMPLETE: Se la domanda cerca un luogo, una regola o un'entità specifica (es. "Dove si trova l'aula 126?", "Come funziona il tirocinio?"), COPIALA TESTUALMENTE senza aggiungere o togliere nulla.
-3. RISOLUZIONE SOGGETTI SOTTINTESI: Modifica la domanda SOLO se si riferisce a una persona o cosa nominata prima tramite pronomi o verbi senza soggetto (es. "Cosa insegna?", "Dov'è il suo studio?"). In quel caso, prendi il NOME ESATTO dall'ultima risposta e inseriscilo (es. "Cosa insegna Vincenzo Auletta?"), rispettando sempre la regola 1.
-4. Restituisci ESCLUSIVAMENTE la domanda riscritta, senza saluti o spiegazioni.
+1. RISOLUZIONE DI RIFERIMENTI (FONDAMENTALE): Se la domanda contiene pronomi ("lui", "lei"), riferimenti ordinali ("il primo", "il secondo"), o riferimenti generici ("il professore", "il componente", "questo corso") che rimandano all'ultima risposta, DEVI sostituirli con il nome proprio esatto (es. da "Parlami del primo componente" a "Parlami di Vincenzo Auletta" oppure da "Cosa insegna?" a "Cosa insegna Vincenzo Auletta?").
+2. SALVAGUARDIA DEI NOMI PROPRI: Se la domanda contiene GIÀ un nome proprio o un soggetto chiaro (es. "Professor Capuano", "Aula 126"), è SEVERAMENTE VIETATO sostituirlo con altri nomi presi dalla cronologia.
+3. NESSUN CONTESTO OVVIO: Non aggiungere MAI frasi come "al DIEM", "del dipartimento", "all'Università di Salerno". Sporcano la ricerca.
+4. COPIA-INCOLLA: Se la domanda è già autonoma e non ha riferimenti ambigui, copiala TESTUALMENTE senza alterare nulla.
+5. Restituisci ESCLUSIVAMENTE la domanda riscritta, senza alcun altro testo.
 
 Cronologia della conversazione:
 {history}
