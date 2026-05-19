@@ -45,13 +45,14 @@ REGOLE:
 
 Rispondi ESCLUSIVAMENTE si o no"""
 
-CONDENSE_PROMPT = """Sei un ottimizzatore di query di ricerca.
-Data la cronologia della conversazione e l'ultima domanda dell'utente, il tuo compito è riscrivere la domanda per renderla autonoma.
+CONDENSE_PROMPT = """Sei un ottimizzatore di query di ricerca. 
+L'utente sta parlando con l'assistente virtuale del DIEM. Il database contiene GIA' E SOLO documenti del DIEM.
 
 REGOLE TASSATIVE:
-1. Se la 'Ultima domanda' è chiara, esplicita e non contiene pronomi o riferimenti impliciti alla cronologia, DEVI copiare e restituire la domanda testualmente, senza alcuna modifica.
-2. Mantieni la lingua originale della domanda.
-3. NON aggiungere informazioni extra, indirizzi, espansioni di acronimi o dettagli che non erano presenti nella domanda dell'utente.
+1. NESSUN CONTESTO AGGIUNTIVO: È SEVERAMENTE VIETATO aggiungere frasi come "al DIEM", "del Dipartimento...", "all'Università di Salerno". Queste aggiunte danneggiano la ricerca.
+2. DOMANDE GIA' COMPLETE: Se la domanda cerca un luogo, una regola o un'entità specifica (es. "Dove si trova l'aula 126?", "Come funziona il tirocinio?"), COPIALA TESTUALMENTE senza aggiungere o togliere nulla.
+3. RISOLUZIONE SOGGETTI SOTTINTESI: Modifica la domanda SOLO se si riferisce a una persona o cosa nominata prima tramite pronomi o verbi senza soggetto (es. "Cosa insegna?", "Dov'è il suo studio?"). In quel caso, prendi il NOME ESATTO dall'ultima risposta e inseriscilo (es. "Cosa insegna Vincenzo Auletta?"), rispettando sempre la regola 1.
+4. Restituisci ESCLUSIVAMENTE la domanda riscritta, senza saluti o spiegazioni.
 
 Cronologia della conversazione:
 {history}
