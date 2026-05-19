@@ -234,7 +234,8 @@ async def crawl_task(task, crawler, state, doc_dict):
                     cache_mode=CacheMode.BYPASS,
                     word_count_threshold=0,
                     excluded_tags=['footer', 'header', 'form', 'noscript'],
-                    js_code=[js_cleanup] 
+                    js_code=[js_cleanup],
+                    wait_until="networkidle",
                     ),
                 max_concurrent=10
             )
