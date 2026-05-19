@@ -25,62 +25,53 @@ REGOLE FONDAMENTALI:
 1. Rispondi in italiano in modo professionale e cordiale.
 2. Basati ESCLUSIVAMENTE sui documenti forniti nel "Contesto".
 3. Se l'informazione non è presente nei documenti, DEVI rispondere ESATTAMENTE: "Mi dispiace, ma non trovo questa informazione nei documenti a mia disposizione." Non tentare di indovinare.
+4. NON usare mai espressioni come "In base al documento X" o "Il documento Y dice". Rispondi in modo diretto, discorsivo e fluido, assumendo le informazioni come tue conoscenze dirette.
+5. Se noti che le informazioni nel contesto sono elenchi di dati, commissioni, orari o contatti, ricostruiscili se possibile mostrandoli all'utente sotto forma di tabella Markdown pulita e ben impaginata.
 """
 
 RAG_PROMPT = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
-    ("human", "Contesto estratto dai documenti:\n{context}\n\nDomanda dell'utente: {question}")
+    ("human", "Contesto:\n{context}\n\nDomanda: {question}")
 ])
 
-DOMAIN_PROMPT = """Sei un filtro di sicurezza per DIEMbot, l'assistente dell'Università di Salerno.
-Il tuo compito è valutare se la domanda dell'utente riguarda il mondo universitario, il dipartimento DIEM, la didattica, la ricerca o i servizi dell'ateneo.
+DOMAIN_PROMPT = """Sei un classificatore di sicurezza e pertinenza per DIEMbot, l'assistente virtuale del DIEM (Università di Salerno).
+Devi determinare se la domanda dell'utente riguarda il dominio accademico: Dipartimento DIEM, Università di Salerno, didattica (corsi, esami, orari, CFU, bandi), ricerca, docenti, personale, strutture (aule, laboratori) o servizi universitari.
 
-REGOLA CRUCIALE SULL'AMBITO DIDATTICO:
-Tutte le domande riguardanti voti, calcolo del voto di laurea, medie ponderate, esami, CFU, immatricolazioni, tasse o carriere studentesche sono da considerarsi IN DOMINIO. Rispondi 'si'.
-REGOLA CRUCIALE SUI NOMI PROPRI:
-Se l'utente chiede informazioni su una PERSONA o cita un NOME E COGNOME (es. "Chi è Mario Vento?"), DEVI SEMPRE classificarla come 'si'. Nel dubbio, fai passare la richiesta.
+REGOLE:
+- Se la domanda include un NOME PROPRIO (es. "Chi è Mario Vento?", "Ricevimento Capuano"), classificala SEMPRE come 'si'. Nel dubbio su un nome, fai passare la richiesta.
+- Se la domanda riguarda l'università, lo studio, la carriera accademica o il DIEM, rispondi 'si'.
+- Se la domanda è totalmente fuori contesto (es. ricette di cucina, sport, gossip), rispondi 'no'.
 
-REGOLA CRUCIALE SUL CONTESTO:
-Se la domanda è breve o contiene pronomi vaghi (es. "qual è la sua capienza?", "dove riceve?"), valuta il contesto della cronologia fornita. Se la cronologia riguarda argomenti universitari, classifica SEMPRE come 'si'.
+Rispondi ESCLUSIVAMENTE si o no"""
 
-Rispondi ESCLUSIVAMENTE con un JSON valido racchiuso tra tag ```json e ``` contenente la chiave 'in_domain' con valore 'si' o 'no'. Nessun altro testo."""
+REWRITE_PROMPT = """Sei un estrattore di parole chiave. Trasforma questa domanda in una stringa di ricerca per un database.
+Togli i convenevoli. Togli le parole inutili. Mantieni solo nomi, concetti e numeri fondamentali.
+NON rispondere all'utente. Rispondi ESCLUSIVAMENTE con le parole chiave estratte."""
 
-REWRITE_PROMPT = """Sei un ottimizzatore rigido di query per un database vettoriale universitario.
-Il tuo UNICO compito è riformulare la domanda che ha fallito la ricerca per migliorarne la reperibilità, SENZA MAI alterarne il senso originale o inventare concetti.
+CONDENSE_PROMPT = """Sei un assistente linguistico. Il tuo unico compito è riformulare l'Ultima Domanda affinché sia chiara, MA SOLO se è incompleta.
 
 REGOLE TASSATIVE:
-1. NON aggiungere MAI argomenti generali se la domanda è specifica (es. NON trasformare un calcolo del voto in "qual è la scala di valutazione").
-2. Mantieni inalterati i dati numerici e le parole chiave principali (es. "media", "28,8", "voto massimo").
-3. Limitati a ripulire la frase da convenevoli o a sostituire i verbi con sinonimi più diretti e focalizzati sulla ricerca (es. "che si può raggiungere" diventa "calcolo", o "ottenere").
-4. Rispondi ESCLUSIVAMENTE con la nuova query pulita, senza preamboli, spiegazioni o virgolette."""
+1. Se l'Ultima Domanda contiene pronomi (suo, sua, lo, la) o un soggetto sottinteso, sostituisci il pronome con il nome preso dalla Cronologia.
+2. Se l'Ultima Domanda ha GIÀ un soggetto chiaro (es. un nome proprio o un argomento nuovo), È AUTONOMA. NON modificarla e NON prendere pezzi dalla cronologia. Riscrivila identica.
+3. NON rispondere alla domanda.
 
-CONDENSE_PROMPT = """Sei un analista linguistico. Il tuo UNICO compito è capire se l'ultima domanda dell'utente ha un soggetto sottinteso che richiede la cronologia per essere compresa.
+ESEMPI DI COMPORTAMENTO:
+Cronologia: "Qual è il curriculum del Professor Rossi?"
+Ultima Domanda: "Chi è la Professoressa Bianchi?"
+Risultato: Chi è la Professoressa Bianchi?
 
-REGOLE FONDAMENTALI:
-1. CAMBIO ARGOMENTO = NESSUN CONTESTO: Se l'utente fa una domanda su un argomento nuovo rispetto alla cronologia (es. prima parlava di voti e ora di aule), la domanda è autonoma. Rispondi "needs_context": false.
-2. SOGGETTO ESPLICITO: Se la domanda è già chiara (es. "Dove si trova l'aula 126?", "Chi è Mario Vento?"), rispondi "needs_context": false.
-3. QUANDO RISPONDERE TRUE: Solo se ci sono pronomi o soggetti assenti (es. "Qual è la sua email?", "Quando riceve?").
-4. COME RISCRIVERE: Se "needs_context" è true, in "rewritten_query" devi scrivere SOLO ed ESCLUSIVAMENTE la domanda neutra con il soggetto esplicitato (es. "Qual è l'email di Mario Vento?"). È SEVERAMENTE VIETATO aggiungere frasi come "Considerando la precedente...", "In base a...", o altre spiegazioni.
+Cronologia: "Chi è l'Ingegner Verdi?"
+Ultima Domanda: "Qual è il suo curriculum?"
+Risultato: Qual è il curriculum dell'Ingegner Verdi?
 
-Rispondi ESCLUSIVAMENTE con un JSON valido con questa struttura:
-{{
-    "needs_context": true o false,
-    "rewritten_query": "la domanda pulita e oggettiva (lascia vuoto se needs_context è false)"
-}}
-Nessun altro testo."""
-DOC_GRADER_PROMPT = """Sei un valutatore per un sistema documentale universitario.
-Il tuo compito è leggere il 'Contesto' estratto e determinare se contiene informazioni pertinenti per rispondere alla 'Domanda'.
+Cronologia: "Dove si trova l'aula A?"
+Ultima Domanda: "Quanti posti ha?"
+Risultato: Quanti posti ha l'aula A?
 
-REGOLE:
-- Rispondi 'si' se il contesto contiene almeno un'informazione utile correlata alla domanda.
-- Rispondi 'no' se il contesto è completamente irrilevante.
+Ora analizza la seguente richiesta e rispondi ESCLUSIVAMENTE con la stringa della domanda finale."""
 
-Rispondi ESCLUSIVAMENTE con un JSON valido racchiuso tra tag ```json e ``` contenente la chiave 'binary_score' con valore 'si' o 'no'. Nessun altro testo."""
+DOC_GRADER_PROMPT = """Il seguente 'Contesto' contiene informazioni utili per rispondere alla 'Domanda'?
+Rispondi ESCLUSIVAMENTE con la parola "SI" oppure "NO". Niente altro."""
 
-ANSWER_GRADER_PROMPT = """Sei un valutatore di qualità. Devi verificare se la 'Generazione' risponde in modo soddisfacente alla 'Domanda' dell'utente.
-
-REGOLE:
-- Rispondi 'si': la generazione risolve il quesito o spiega correttamente che l'informazione manca nei documenti.
-- Rispondi 'no': la generazione elude la domanda o è confusa.
-
-Rispondi ESCLUSIVAMENTE con un JSON valido racchiuso tra tag ```json e ``` contenente la chiave 'binary_score' con valore 'si' o 'no'. Nessun altro testo."""
+ANSWER_GRADER_PROMPT = """La seguente 'Generazione' risponde in modo sensato alla 'Domanda'?
+Rispondi ESCLUSIVAMENTE con la parola "SI" oppure "NO". Niente altro."""
