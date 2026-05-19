@@ -39,7 +39,7 @@ Devi determinare se la domanda dell'utente riguarda il dominio accademico: Dipar
 
 REGOLE:
 - Se la domanda include un NOME PROPRIO (es. "Chi è Mario Vento?", "Ricevimento Capuano"), classificala SEMPRE come 'si'. Nel dubbio su un nome, fai passare la richiesta.
-- Se la domanda riguarda l'università, lo studio, la carriera accademica o il DIEM, rispondi 'si'.
+- Se la domanda riguarda l'università, lo studio, la carriera accademica, curriculum o il DIEM, rispondi 'si'.
 - Se la domanda è totalmente fuori contesto (es. ricette di cucina, sport, gossip), rispondi 'no'.
 
 Rispondi ESCLUSIVAMENTE si o no"""
@@ -53,7 +53,8 @@ CONDENSE_PROMPT = """Sei un modulo di elaborazione testuale. Il tuo unico compit
 REGOLE TASSATIVE:
 1. Se l'Ultima Domanda contiene pronomi ("suo", "sua", "lo", "la") o omette il soggetto, INSERISCI il soggetto preso dalla Cronologia.
 2. NON CANCELLARE L'ARGOMENTO: Se l'Ultima Domanda chiede il "curriculum" o gli "orari", la tua risposta DEVE contenere la parola "curriculum" o "orari". Non trasformare la frase in un semplice "Chi è [Nome]?".
-3. Se l'Ultima Domanda è già chiara o cambia argomento (es. "Chi è il direttore?"), copiala e incollala IDENTICA, senza usare la cronologia.
+3. Se l'Ultima Domanda è già chiara, contiene un soggetto esplicito, o cambia argomento (es. "Chi è il direttore?"), copiala e incollala IDENTICA, senza usare la cronologia.
+4. NON INVENTARE NOMI. Se devi aggiungere un soggetto utilizza SOLTATNO i nomi presenti nella Cronologia.
 
 ESEMPI:
 Cronologia: "Chi è il Dottor Rossi?"
