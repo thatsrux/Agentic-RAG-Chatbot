@@ -48,27 +48,27 @@ REWRITE_PROMPT = """Sei un estrattore di parole chiave. Trasforma questa domanda
 Togli i convenevoli. Togli le parole inutili. Mantieni solo nomi, concetti e numeri fondamentali.
 NON rispondere all'utente. Rispondi ESCLUSIVAMENTE con le parole chiave estratte."""
 
-CONDENSE_PROMPT = """Sei un assistente linguistico. Il tuo unico compito è riformulare l'Ultima Domanda affinché sia chiara, MA SOLO se è incompleta.
+CONDENSE_PROMPT = """Sei un modulo di elaborazione testuale. Il tuo unico compito è rendere l'Ultima Domanda indipendente, sostituendo i pronomi con il nome corretto preso dalla Cronologia.
 
 REGOLE TASSATIVE:
-1. Se l'Ultima Domanda contiene pronomi (suo, sua, lo, la) o un soggetto sottinteso, sostituisci il pronome con il nome preso dalla Cronologia.
-2. Se l'Ultima Domanda ha GIÀ un soggetto chiaro (es. un nome proprio o un argomento nuovo), È AUTONOMA. NON modificarla e NON prendere pezzi dalla cronologia. Riscrivila identica.
-3. NON rispondere alla domanda.
+1. Se l'Ultima Domanda contiene pronomi ("suo", "sua", "lo", "la") o omette il soggetto, INSERISCI il soggetto preso dalla Cronologia.
+2. NON CANCELLARE L'ARGOMENTO: Se l'Ultima Domanda chiede il "curriculum" o gli "orari", la tua risposta DEVE contenere la parola "curriculum" o "orari". Non trasformare la frase in un semplice "Chi è [Nome]?".
+3. Se l'Ultima Domanda è già chiara o cambia argomento (es. "Chi è il direttore?"), copiala e incollala IDENTICA, senza usare la cronologia.
 
-ESEMPI DI COMPORTAMENTO:
-Cronologia: "Qual è il curriculum del Professor Rossi?"
-Ultima Domanda: "Chi è la Professoressa Bianchi?"
-Risultato: Chi è la Professoressa Bianchi?
-
-Cronologia: "Chi è l'Ingegner Verdi?"
+ESEMPI:
+Cronologia: "Chi è il Dottor Rossi?"
 Ultima Domanda: "Qual è il suo curriculum?"
-Risultato: Qual è il curriculum dell'Ingegner Verdi?
+Risultato: Qual è il curriculum del Dottor Rossi?
 
-Cronologia: "Dove si trova l'aula A?"
+Cronologia: "Dove si trova l'Aula A?"
 Ultima Domanda: "Quanti posti ha?"
-Risultato: Quanti posti ha l'aula A?
+Risultato: Quanti posti ha l'Aula A?
 
-Ora analizza la seguente richiesta e rispondi ESCLUSIVAMENTE con la stringa della domanda finale."""
+Cronologia: "Chi è il Dottor Rossi?"
+Ultima Domanda: "Chi è il direttore del DIEM?"
+Risultato: Chi è il direttore del DIEM?
+
+Rispondi ESCLUSIVAMENTE con il testo della domanda finale, senza altre parole."""
 
 DOC_GRADER_PROMPT = """Il seguente 'Contesto' contiene informazioni utili per rispondere alla 'Domanda'?
 Rispondi ESCLUSIVAMENTE con la parola "SI" oppure "NO". Niente altro."""
