@@ -51,25 +51,33 @@ NON rispondere all'utente. Rispondi ESCLUSIVAMENTE con le parole chiave estratte
 CONDENSE_PROMPT = """Sei un modulo di elaborazione testuale. Il tuo unico compito è rendere l'Ultima Domanda indipendente, sostituendo i pronomi con il nome corretto preso dalla Cronologia.
 
 REGOLE TASSATIVE:
-1. Se l'Ultima Domanda contiene pronomi ("suo", "sua", "lo", "la") o omette il soggetto, INSERISCI il soggetto preso dalla Cronologia.
-2. NON CANCELLARE L'ARGOMENTO: Se l'Ultima Domanda chiede il "curriculum" o gli "orari", la tua risposta DEVE contenere la parola "curriculum" o "orari". Non trasformare la frase in un semplice "Chi è [Nome]?".
-3. Se l'Ultima Domanda è già chiara, contiene un soggetto esplicito, o cambia argomento (es. "Chi è il direttore?"), copiala e incollala IDENTICA, senza usare la cronologia.
-4. NON INVENTARE NOMI. Se devi aggiungere un soggetto utilizza SOLTATNO i nomi presenti nella Cronologia.
+1. DIVIETO DI SOVRASCRITTURA: Se l'Ultima Domanda è già chiara o contiene un soggetto esplicito (es. una sigla come "DIEM", un nome, un luogo, un aula specifica), NON DEVI MAI sostituirlo con quello della cronologia. Copiala e incollala IDENTICA in ogni sua parola e punteggiatura.
+2. Se l'Ultima Domanda contiene pronomi ("suo", "sua", "lo", "la") o omette il soggetto, INSERISCI il soggetto preso dalla Cronologia. Dai priorità assoluta al soggetto menzionato nell'ULTIMO turno di conversazione, procedendo a ritroso (dal più recente al più vecchio) solo se necessario.
+3. NON CANCELLARE L'ARGOMENTO: Se l'Ultima Domanda chiede il "curriculum" o gli "orari", la tua risposta DEVE contenere la parola "curriculum" o "orari". Non trasformare la frase in un semplice "Chi è [Nome]?".
+4. NON TAGLIARE LE PREMESSE: Se l'Ultima Domanda è composta da più frasi, contiene numeri, dati o affermazioni iniziali, DEVI conservare l'intero testo originario. Non estrarre solo la parte col punto interrogativo.
+5. NON INVENTARE NOMI. Se devi aggiungere un soggetto utilizza SOLTANTO i nomi presenti nella Cronologia.
 
 ESEMPI:
-Cronologia: "Chi è il Dottor Rossi?"
+Cronologia: "Chi è il prof [Nome]?"
 Ultima Domanda: "Qual è il suo curriculum?"
-Risultato: Qual è il curriculum del Dottor Rossi?
+Risultato: Qual è il curriculum del prof [Nome]?
 
-Cronologia: "Dove si trova l'Aula A?"
+Cronologia: "Dove si trova l'Aula [X]?"
 Ultima Domanda: "Quanti posti ha?"
-Risultato: Quanti posti ha l'Aula A?
+Risultato: Quanti posti ha l'Aula [X]?
 
-Cronologia: "Chi è il Dottor Rossi?"
+Cronologia: "Dove si trova l'Aula [X]?"
+Ultima Domanda: "Dove si trova il [Luogo Y]?"
+Risultato: Dove si trova il [Luogo Y]?
+
+Cronologia: "Chi è il prof [Nome]?"
 Ultima Domanda: "Chi è il direttore del DIEM?"
 Risultato: Chi è il direttore del DIEM?
 
-Rispondi ESCLUSIVAMENTE con il testo della domanda finale, senza altre parole."""
+REGOLE DI OUTPUT TASSATIVE:
+- NON RISPONDERE MAI ALLA DOMANDA dell'utente.
+- NON usare MAI frasi di rifiuto, scuse o conversazione (es. "Non posso fornire...", "Ecco la domanda:").
+- Rispondi SOLO ed ESCLUSIVAMENTE con la nuda stringa della domanda riformulata finale, senza un singolo carattere prima o dopo."""
 
 DOC_GRADER_PROMPT = """Il seguente 'Contesto' contiene informazioni utili per rispondere alla 'Domanda'?
 Rispondi ESCLUSIVAMENTE con la parola "SI" oppure "NO". Niente altro."""
