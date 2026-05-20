@@ -4,7 +4,7 @@ from langgraph.graph import StateGraph, START, END
 from utils.config import RAGState
 from utils.nodes import *
 from utils.retriever import HybridRetriever
-from utils.style import get_info_icon_html
+from utils.style import get_info_icon_html, get_global_css
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -33,6 +33,7 @@ def build_graph():
 
 def main():
     st.set_page_config(page_title="DIEMbot", page_icon="🎓", layout="centered")
+    st.markdown(get_global_css(), unsafe_allow_html=True)
     st.title("🎓 DIEMbot")
     st.caption("Assistente virtuale ufficiale del DIEM – Università di Salerno")
 
