@@ -12,30 +12,27 @@ os.environ["OMP_NUM_THREADS"] = "1"
 def build_graph():
     workflow = StateGraph(RAGState)
 
+    # 1. Aggiungi SOLO i nodi essenziali
+    workflow.add_node("condense_question", condense_question_node)
     workflow.add_node("domain_guard", domain_guard_node)
     workflow.add_node("retrieve", retrieve_node)
     workflow.add_node("generate", generate_node)
-    workflow.add_node("grade_generation", grade_generation_node)
-    workflow.add_node("rewrite", rewrite_node)
-    workflow.add_node("fallback", fallback_node)
 
-    workflow.add_edge(START, "domain_guard")
+    # 2. Definisci il flusso
+    workflow.add_edge(START, "condense_question")
+    workflow.add_edge("condense_question", "domain_guard")
 
+    # Guard: se è fuori dominio termina, altrimenti recupera
     workflow.add_conditional_edges(
         "domain_guard", route_after_domain,
         {"in_domain": "retrieve", "out_of_domain": END}
     )
-
+    
+    # Dal retrieve passiamo DIRETTAMENTE alla generazione
     workflow.add_edge("retrieve", "generate")
-    workflow.add_edge("generate", "grade_generation")
-
-    workflow.add_conditional_edges(
-        "grade_generation", route_after_grade,
-        {"useful": END, "rewrite": "rewrite", "max_retries": "fallback"}
-    )
-
-    workflow.add_edge("rewrite", "retrieve")
-    workflow.add_edge("fallback", END)
+    
+    # La generazione è lo step finale
+    workflow.add_edge("generate", END)
 
     return workflow.compile()
 
@@ -106,7 +103,19 @@ def main():
 
         with st.chat_message("assistant"):
             with st.spinner("DIEMbot sta elaborando la richiesta..."):
-                initial_state = {"question": user_input, "retry_count": 0}
+                
+                history_str = ""
+                recent_messages = st.session_state.messages[-5:-1] 
+                for msg in recent_messages:
+                    role = "Utente" if msg["role"] == "user" else "DIEMbot"
+                    history_str += f"{role}: {msg['content']}\n"
+                
+                initial_state = {
+                    "question": user_input,
+                    "chat_history": history_str,
+                    "retry_count": 0
+                }
+                
                 final_state = rag_app.invoke(initial_state)
                 
                 full_response = final_state["generation"]
