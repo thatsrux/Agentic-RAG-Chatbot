@@ -1,0 +1,18 @@
+[theme]
+# Tema scuro di base
+base="dark"
+
+# Colore principale (usato per bottoni primari, caricamenti, focus) - Un azzurro/blu tecnologico
+primaryColor="#38bdf8"
+
+# Sfondo principale della pagina (un blu notte quasi nero, molto elegante)
+backgroundColor="#020617"
+
+# Sfondo secondario (usato per la sidebar e i box)
+secondaryBackgroundColor="#0f172a"
+
+# Colore del testo
+textColor="#f8fafc"
+
+# Font più moderno
+font="sans serif"
