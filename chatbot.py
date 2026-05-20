@@ -97,42 +97,53 @@ def main():
         del st.session_state.pending_question
 
     if user_input:
+        # 1. Memorizziamo il messaggio utente
         st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
             st.markdown(user_input)
 
         with st.chat_message("assistant"):
             with st.spinner("DIEMbot sta elaborando la richiesta..."):
-                
-                history_str = ""
-                recent_messages = st.session_state.messages[-5:-1] 
-                for msg in recent_messages:
-                    role = "Utente" if msg["role"] == "user" else "DIEMbot"
-                    history_str += f"{role}: {msg['content']}\n"
-                
                 initial_state = {
-                    "question": user_input,
-                    "chat_history": history_str,
+                    "question": user_input, 
+                    "chat_history": st.session_state.messages[:-1], 
                     "retry_count": 0
                 }
                 
-                final_state = rag_app.invoke(initial_state)
-                
-                full_response = final_state["generation"]
-                sources_list = final_state.get("sources", [])
+                try:
+                    # --- TENTATIVO DI ESECUZIONE ---
+                    final_state = rag_app.invoke(initial_state)
+                    
+                    full_response = final_state["generation"]
+                    sources_list = final_state.get("sources", [])
 
-                st.markdown(full_response)
-                
-                if show_sources and sources_list:
-                    with st.expander("📄 Fonti consultate"):
-                        for src in sources_list:
-                            st.caption(f"• {src}")
+                    st.markdown(full_response)
+                    
+                    if show_sources and sources_list:
+                        with st.expander("📄 Fonti consultate"):
+                            for src in sources_list:
+                                st.caption(f"• {src}")
 
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": full_response,
-                "sources": sources_list
-            })
+                    # Memorizziamo la risposta solo se tutto è andato a buon fine
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": full_response,
+                        "sources": sources_list
+                    })
+
+                except Exception as e:
+                    # --- DEBUG TEMPORANEO ---
+                    st.error(f"🛠️ ERRORE TECNICO REALE: {str(e)}")
+                    # ------------------------
+
+                    error_msg = str(e).lower()
+                    
+                    if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
+                        st.warning("⏳ **Troppe richieste!** Il Dipartimento sta facendo molte domande a DIEMbot. Per favore, attendi circa un minuto e riprova.")
+                    else:
+                        st.error("❌ Ops, si è verificato un errore di connessione con il modello AI. Riprova tra un attimo.")
+                    
+                    st.session_state.messages.pop()
 
 if __name__ == "__main__":
     main()

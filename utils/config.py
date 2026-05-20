@@ -10,7 +10,7 @@ MAX_RETRIES = 2
 
 class RAGState(TypedDict):
     question: str
-    chat_history: str
+    chat_history: list
     context: str
     sources: List[str]
     generation: str
