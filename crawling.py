@@ -317,32 +317,102 @@ def parse_easycourse_table(html_content):
     return ""
 
 def extract_links_and_pdfs(html, current_url, start_url):
-    soup, links_to_visit, pdfs_to_download = BeautifulSoup(html, "html.parser"), [], []
+    soup = BeautifulSoup(html, "html.parser")
+    links_to_visit = []
+    pdfs_to_download = []
+    
+    # --- FIX 1: Pulisce i doppi slash che confondono il calcolo dei confini ---
+    start_url = re.sub(r'(?<!:)//+', '/', start_url)
+    current_url = re.sub(r'(?<!:)//+', '/', current_url)
+    
     base_boundary = start_url.lower().rstrip('/')
-    valid_boundaries = [base_boundary] + [alias.lower() for k, alias in CORSI_ALIASES.items() if base_boundary in (k.lower(), alias.lower())] + [k.lower() for k, alias in CORSI_ALIASES.items() if base_boundary in (k.lower(), alias.lower())]
     allowed_domain = urlparse(start_url).netloc
+    is_easycourse = (allowed_domain == "easycourse.unisa.it")
+    
+    if is_easycourse:
+        if base_boundary.endswith('.html'):
+            base_boundary = base_boundary.rsplit('/', 1)[0]
+        elif '/easyroom/index.php' in base_boundary:
+            base_boundary = base_boundary.split('?')[0]
+    
+    valid_boundaries = [base_boundary]
+    
+    for key, alias in CORSI_ALIASES.items():
+        if base_boundary == key.lower():
+            valid_boundaries.append(alias.lower())
+        elif base_boundary == alias.lower():
+            valid_boundaries.append(key.lower())
 
-    # Estrazione classica dai tag <a>
-    for a in soup.find_all('a', href=True):
-        href = a['href']
-        if not href or href.startswith(('javascript:', 'mailto:', 'tel:')): continue
-        if not href.startswith(('http', '/', '#')): href = '/' + href
+    # --- FIX 2: INIEZIONE DIRETTA ---
+    # Poiché index.html è un frameset vuoto, forziamo l'aggiunta delle pagine 
+    # che contengono le vere liste di link, saltando il problema del DOM vuoto.
+    if is_easycourse and current_url.lower().endswith('index.html'):
+        base_dir = current_url.rsplit('/', 1)[0]
+        links_to_visit.append(f"{base_dir}/tree.html")
+        links_to_visit.append(f"{base_dir}/ttteacherhtml.html")
+        links_to_visit.append(f"{base_dir}/ttcdlhtml.html")
+
+    for tag in soup.find_all(['a', 'frame', 'iframe', 'option']):
+        href = tag.get('href') or tag.get('src') or tag.get('value')
+        
+        if not href or href.startswith(('javascript:', 'mailto:', 'tel:', '#')):
+            continue
+        if href in ['export_xls', 'null', '-- scegli --']:
+            continue
+
+        if not is_easycourse:
+            if not href.startswith(('http', '/', '#')):
+                href = '/' + href
+
         full_url = urljoin(current_url, href).split('#')[0]
         parsed = urlparse(full_url)
+        link_domain = parsed.netloc
         
-        if full_url.lower().endswith('.pdf') or '/pdf/' in full_url.lower():
-            if parsed.netloc == allowed_domain: pdfs_to_download.append(full_url)
-        elif any(full_url.lower().startswith(b) for b in valid_boundaries):
-            if allowed_domain == "docenti.unisa.it" and [p for p in parsed.path.split('/') if p] and '.' in [p for p in parsed.path.split('/') if p][0]: continue
-            if not any(full_url.lower().endswith(ext) for ext in ['.css', '.js', '.png', '.jpg', '.jpeg']):
-                if '/en/' not in full_url and not full_url.endswith('/en'): links_to_visit.append(full_url)
+        url_l = full_url.lower()
 
-    if "easycourse" in allowed_domain:
-        for option in soup.find_all('option', value=True):
-            val = option['value']
-            if 'easyroom' in val.lower():
-                full_url = urljoin(current_url, val).split('#')[0]
-                links_to_visit.append(full_url)
+        if url_l.endswith('.pdf') or '/pdf/' in url_l:
+            if link_domain == allowed_domain:
+                pdfs_to_download.append(full_url)
+
+        elif any(url_l.startswith(b) for b in valid_boundaries):
+
+            if allowed_domain == "docenti.unisa.it":
+                path_parts = [p for p in parsed.path.split('/') if p]
+                if path_parts and '.' in path_parts[0]:
+                    continue
+
+            if is_easycourse:
+                if any(t in url_l for t in ['date=', 'data=', 'day=', 'week=', 'month=', 'year=', 'periodo=', 'settimana=']):
+                    continue
+                
+                export_traps = ['esporta=', 'print=', 'ical=', 'view=pdf']
+                if any(t in url_l for t in export_traps):
+                    continue
+
+                if '_lang=' in url_l and '_lang=it' not in url_l:
+                    continue
+
+                is_whitelisted = False
+                
+                if url_l.endswith('/index.html') or url_l.endswith('/tree.html') or url_l.endswith('/main.html'):
+                    is_whitelisted = True
+                elif any(url_l.endswith(view) for view in ['/tthtml.html', '/ttcdlhtml.html', '/ttteacherhtml.html', '/ttdayhtml.html']):
+                    is_whitelisted = True
+                # --- FIX 3: Whitelist allargata per includere TUTTI i Curricula e i Docenti ---
+                elif '/curricula/' in url_l:
+                    is_whitelisted = True
+                elif '/docenti/' in url_l:
+                    is_whitelisted = True
+                elif '/easyroom/' in url_l:
+                    if any(f"area={a}&" in url_l or url_l.endswith(f"area={a}") for a in ['2', '36', '37']):
+                        is_whitelisted = True
+                        
+                if not is_whitelisted:
+                    continue
+            
+            if not any(url_l.endswith(ext) for ext in ['.css', '.js', '.png', '.jpg', '.jpeg']):
+                if '/en/' not in full_url and not full_url.endswith('/en'):
+                    links_to_visit.append(full_url)
 
     return list(set(links_to_visit)), list(set(pdfs_to_download))
 
@@ -397,13 +467,6 @@ async def crawl_task(task, crawler, state, doc_dict):
 
             next_queue = []
             for result in results:
-                print(f"DEBUG: URL={result.url}")
-                print(f"DEBUG: Success={result.success}, Status={result.status_code}")
-                # Stampa solo i primi 200 caratteri del markdown per vedere se è vuoto
-                preview = result.markdown[:200].replace('\n', ' ')
-                print(f"DEBUG: Markdown Preview='{preview}'")
-                print(f"DEBUG: Length={len(result.markdown)}")
-                # -------------------
                 if not result.success or (result.status_code and result.status_code != 200 and result.status_code != 301 and result.status_code != 302): continue
                 
                 # --- INTERCETTAZIONE CALENDARI E EASYROOM ---
@@ -464,9 +527,9 @@ async def crawl_task(task, crawler, state, doc_dict):
 async def main():
     state, doc_dict = load_state(), load_knowledge_base()
     SEARCH_TASKS = [
-        #{"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 4, "filter": False},
-        #{"name": "Docenti", "urls": ["https://docenti.unisa.it/"], "depth": 3, "filter": True},
-        #{"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 3, "filter": False}
+        {"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 4, "filter": False},
+        {"name": "Docenti", "urls": ["https://docenti.unisa.it/"], "depth": 3, "filter": True},
+        {"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 3, "filter": False},
         {"name": "EasyCourse", "urls": EASYCOURSE, "depth": 2, "filter": False},
         {"name": "EasyRoom", "urls": EASYROOM, "depth": 1, "filter": False}
     ]
