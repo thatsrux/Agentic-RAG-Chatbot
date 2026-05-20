@@ -23,7 +23,6 @@ VS_DIR = "knowledge/vectorstores"
 
 K_WEB = 10
 K_PDF = 5
-K_EXCEL = 5  # Numero di chunk da recuperare per gli Excel
 
 TOP_N = 5
 
@@ -38,12 +37,6 @@ PDF_CHILD_SIZE = 800
 PDF_CHILD_OVERLAP = 80
 PDF_PARENT_SIZE = 3000
 PDF_PARENT_OVERLAP = 300
-
-# EXCEL (Stesse dimensioni del Web, trattandosi di Markdown)
-EXCEL_CHILD_SIZE = 800
-EXCEL_CHILD_OVERLAP = 80
-EXCEL_PARENT_SIZE = 3000
-EXCEL_PARENT_OVERLAP = 300
 
 BM25_ENABLED = True
 
@@ -62,9 +55,6 @@ class HybridRetriever:
         self.web_retriever, self.web_vs = self._load_web_retriever()
 
         self.pdf_retriever = self._load_pdf_retriever()
-
-        # Nuova inizializzazione per Excel
-        self.excel_retriever, self.excel_vs = self._load_excel_retriever()
 
         self.reranker = self._load_reranker()
 
@@ -167,45 +157,6 @@ class HybridRetriever:
             }
         )
 
-    def _load_excel_retriever(self):
-
-        print("  [EXCEL] Loading Parent-Child FAISS Excel...")
-        
-        try:
-            child_vectorstore = FAISS.load_local(
-                os.path.join(VS_DIR, "faiss_excel_child"),
-                self.emb,
-                allow_dangerous_deserialization=True
-            )
-
-            parent_docstore = create_kv_docstore(
-                LocalFileStore(
-                    os.path.join(VS_DIR, "docstore_excel")
-                )
-            )
-
-            retriever = ParentDocumentRetriever(
-                vectorstore=child_vectorstore,
-                docstore=parent_docstore,
-                child_splitter=MarkdownTextSplitter(
-                    chunk_size=EXCEL_CHILD_SIZE,
-                    chunk_overlap=EXCEL_CHILD_OVERLAP,
-                ),
-                parent_splitter=MarkdownTextSplitter(
-                    chunk_size=EXCEL_PARENT_SIZE,
-                    chunk_overlap=EXCEL_PARENT_OVERLAP,
-                ),
-                search_kwargs={
-                    "k": K_EXCEL
-                }
-            )
-            
-            return retriever, child_vectorstore
-        except Exception as e:
-            print(f"  [EXCEL] Failed to load Excel FAISS: {e}")
-            # Fallback sicuro se il VectorStore Excel non esiste ancora
-            return None, None
-
     # =====================================================
     # RERANKER
     # =====================================================
@@ -238,14 +189,6 @@ class HybridRetriever:
             )
             docs.extend(web_docs)
             
-            # Carica anche i chunk Excel (molto utili per la ricerca esatta di aule/prof)
-            if hasattr(self, 'excel_vs') and self.excel_vs is not None:
-                excel_docs = self.excel_vs.similarity_search(
-                    "test",
-                    k=100000
-                )
-                docs.extend(excel_docs)
-
             self.bm25_docs = docs
 
             tokenized = [
@@ -258,7 +201,6 @@ class HybridRetriever:
             print(f"  [BM25] Indexed {len(docs)} documents.")
 
         except Exception as e:
-
             print(f"  [BM25] Failed: {e}")
 
     # =====================================================
@@ -303,15 +245,6 @@ class HybridRetriever:
         except Exception as e:
             print(f"[PDF] Retrieval failed: {e}")
             return []
-            
-    def _retrieve_excel(self, query):
-        if self.excel_retriever is None:
-            return []
-        try:
-            return self.excel_retriever.invoke(query)
-        except Exception as e:
-            print(f"[EXCEL] Retrieval failed: {e}")
-            return []
 
     def _retrieve_bm25(self, query):
 
@@ -330,7 +263,7 @@ class HybridRetriever:
                 reverse=True
             )
 
-            # Raccoglie i top documenti dal BM25 (limite K_WEB)
+            # Raccoglie i top documenti dal BM25
             return [
                 doc
                 for doc, score in ranked[:K_WEB]
@@ -350,15 +283,13 @@ class HybridRetriever:
 
         web_chunks = []
         pdf_chunks = []
-        excel_chunks = []
         bm25_chunks = []
 
         # =================================================
         # PARALLEL RETRIEVAL
         # =================================================
 
-        # Aumentato il numero di worker per supportare anche la coda Excel
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        with ThreadPoolExecutor(max_workers=3) as executor:
 
             futures = {}
 
@@ -377,14 +308,6 @@ class HybridRetriever:
                     self._retrieve_pdf,
                     query
                 )
-                
-            # EXCEL
-            if route in ["excel", "both", "all"]:
-                
-                futures["excel"] = executor.submit(
-                    self._retrieve_excel,
-                    query
-                )
 
             # BM25
             if BM25_ENABLED:
@@ -401,9 +324,6 @@ class HybridRetriever:
 
             if "pdf" in futures:
                 pdf_chunks = futures["pdf"].result()
-                
-            if "excel" in futures:
-                excel_chunks = futures["excel"].result()
 
             if "bm25" in futures:
                 bm25_chunks = futures["bm25"].result()
@@ -415,7 +335,6 @@ class HybridRetriever:
         all_candidates = self._dedup(
             web_chunks +
             pdf_chunks +
-            excel_chunks +
             bm25_chunks
         )
 

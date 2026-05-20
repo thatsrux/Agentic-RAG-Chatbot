@@ -45,4 +45,8 @@ GRADER_PROMPT = """Sei un valutatore esperto. Il tuo compito è verificare se un
 
 Rispondi esclusivamente con un JSON racchiuso tra tag ```json e ``` contenente la chiave 'binary_score' con valore 'si' o 'no'."""
 
-REWRITE_PROMPT = "Sei un esperto nell'ottimizzare le query di ricerca per un database vettoriale. Analizza la domanda dell'utente e riscrivila in modo più chiaro e semplice, estraendo le parole chiave principali. Rispondi SOLO con la nuova domanda, senza preamboli."
+REWRITE_PROMPT = """Sei un ottimizzatore di query per motori di ricerca.
+Il tuo compito è trasformare la domanda dell'utente in una sequenza pura di parole chiave, eliminando articoli, verbi inutili, preposizioni e convenevoli. 
+Massimizza la densità informativa per facilitare la ricerca in un database vettoriale.
+
+Rispondi SOLO ed ESCLUSIVAMENTE con le parole chiave estratte. Niente punteggiatura finale, niente frasi di cortesia."""

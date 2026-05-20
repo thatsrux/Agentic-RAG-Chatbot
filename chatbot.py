@@ -31,7 +31,11 @@ def build_graph():
 
     workflow.add_conditional_edges(
         "grade_generation", route_after_grade,
-        {"useful": END, "rewrite": "rewrite", "max_retries": "fallback"}
+        {
+            "useful": END, 
+            "rewrite": "rewrite", 
+            "max_retries": "fallback"
+        }
     )
 
     workflow.add_edge("rewrite", "retrieve")
