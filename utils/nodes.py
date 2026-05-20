@@ -4,7 +4,6 @@ from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from utils.config import *
 from utils.utils import load_llm, format_context
 
-# ── ANSI colors ────────────────────────────────────────────
 RESET   = "\033[0m"
 BOLD    = "\033[1m"
 CYAN    = "\033[96m"    # CONDENSE
@@ -21,9 +20,7 @@ def _log(color, tag, msg):
 
 def _sep(color, label):
     print(f"\n{BOLD}{color}{'━'*20} {label} {'━'*20}{RESET}")
-# ───────────────────────────────────────────────────────────
 
-# --- FIX GEMINI: Funzione di estrazione sicura ---
 def _safe_extract_string(output) -> str:
     """Previene l'errore 'list object has no attribute strip'."""
     if isinstance(output, list):
@@ -33,7 +30,6 @@ def _safe_extract_string(output) -> str:
             return str(output[0])
         return ""
     return str(output)
-# -------------------------------------------------
 
 def condense_question_node(state: RAGState):
     question = state["question"]
@@ -42,13 +38,10 @@ def condense_question_node(state: RAGState):
     _sep(CYAN, "CONDENSE QUESTION")
     _log(CYAN, "CONDENSE", f"INPUT  question : {question}")
 
-    # Se la lista è vuota, non c'è storia da condensare
     if not history_list:
         _log(CYAN, "CONDENSE", "Nessuna history → skip LLM")
         return {"question": question}
 
-    # Trasformiamo la lista dei dizionari in una stringa leggibile dall'LLM
-    # (Prendiamo solo gli ultimi 4 messaggi per mantenere il contesto fresco)
     recent_history = history_list[-4:] if len(history_list) > 4 else history_list
     chat_history_str = ""
     for msg in recent_history:
@@ -56,15 +49,14 @@ def condense_question_node(state: RAGState):
         chat_history_str += f"{role}: {msg['content']}\n"
 
     prompt = PromptTemplate.from_template(CONDENSE_PROMPT)
-    chain = prompt | load_llm() | StrOutputParser()
+    chain = prompt | load_llm(state.get("current_model")) | StrOutputParser()
 
     try:
         raw_output = chain.invoke({
-            "history": chat_history_str,  # Passiamo la stringa formattata
+            "history": chat_history_str,
             "query": question
         })
         
-        # Estraiamo la stringa in modo sicuro usando la funzione scudo
         new_question = _safe_extract_string(raw_output).strip()
         
         _log(CYAN, "CONDENSE", f"OUTPUT rewritten : {new_question}")
@@ -83,15 +75,14 @@ def domain_guard_node(state: RAGState):
         ("system", DOMAIN_PROMPT),
         ("human", f"Domanda utente: {question}")
     ])
-    chain = prompt | load_llm() | StrOutputParser()
+    chain = prompt | load_llm(state.get("current_model")) | StrOutputParser()
 
     try:
         raw_output = chain.invoke({})
-        # Estraiamo la stringa in modo sicuro prima di manipolarla
         result = _safe_extract_string(raw_output).strip().lower()
         in_domain = "no" if "no" in result[:5] else "si" 
     except Exception:
-        in_domain = "si" # Nel dubbio, fa passare
+        in_domain = "si"
 
     _log(YELLOW, "DOMAIN_GUARD", f"OUTPUT in_domain: {in_domain}")
 
@@ -120,14 +111,19 @@ def generate_node(state: RAGState):
     _sep(MAGENTA, "GENERATE")
     _log(MAGENTA, "GENERATE", f"INPUT  question           : {state['question']}")
     
-    chain = RAG_PROMPT | load_llm() | StrOutputParser()
-    raw_output = chain.invoke({"context": state["context"], "question": state["question"]})
+    chain = RAG_PROMPT | load_llm(state.get("current_model")) 
     
-    # Estraiamo la stringa in modo sicuro
-    response = _safe_extract_string(raw_output)
+    ai_message = chain.invoke({"context": state["context"], "question": state["question"]})
     
-    _log(MAGENTA, "GENERATE", f"OUTPUT response (300 car) : {response[:300]}")
-    return {"generation": response}
+    response_text = _safe_extract_string(ai_message.content)
+    
+    metadata = ai_message.response_metadata
+    model_used = metadata.get("model_name") or metadata.get("model") or "Sconosciuto"
+    
+    _log(MAGENTA, "GENERATE", f"OUTPUT response (300 car) : {response_text[:300]}")
+    _log(MAGENTA, "GENERATE", f"MODEL USED : {model_used}")
+    
+    return {"generation": response_text, "model_used": model_used}
 
 def route_after_domain(state: RAGState):
     return "out_of_domain" if state.get("is_in_domain") == "no" else "in_domain"

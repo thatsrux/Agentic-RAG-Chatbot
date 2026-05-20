@@ -6,6 +6,7 @@ device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is
 
 #OLLAMA_MODEL = "llama3.1"
 OLLAMA_MODEL = "mistral-nemo"
+
 MAX_RETRIES = 2
 
 class RAGState(TypedDict):
@@ -18,6 +19,8 @@ class RAGState(TypedDict):
     answer_grade: str
     retry_count: int
     is_in_domain: str
+    model_used: str
+    current_model: str
 
 SYSTEM_PROMPT = """
 Sei DIEMbot, l'assistente virtuale del DIEM (Dipartimento di Ingegneria dell'Informazione ed Elettrica e Matematica applicata) dell'Università di Salerno.

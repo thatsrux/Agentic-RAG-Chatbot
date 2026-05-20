@@ -4,34 +4,29 @@ from langgraph.graph import StateGraph, START, END
 from utils.config import RAGState
 from utils.nodes import *
 from utils.retriever import HybridRetriever
+from utils.style import get_info_icon_html
 
-# --- PROTEZIONE CRASH ---
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["OMP_NUM_THREADS"] = "1"
 
 def build_graph():
     workflow = StateGraph(RAGState)
 
-    # 1. Aggiungi SOLO i nodi essenziali
     workflow.add_node("condense_question", condense_question_node)
     workflow.add_node("domain_guard", domain_guard_node)
     workflow.add_node("retrieve", retrieve_node)
     workflow.add_node("generate", generate_node)
 
-    # 2. Definisci il flusso
     workflow.add_edge(START, "condense_question")
     workflow.add_edge("condense_question", "domain_guard")
 
-    # Guard: se è fuori dominio termina, altrimenti recupera
     workflow.add_conditional_edges(
         "domain_guard", route_after_domain,
         {"in_domain": "retrieve", "out_of_domain": END}
     )
     
-    # Dal retrieve passiamo DIRETTAMENTE alla generazione
     workflow.add_edge("retrieve", "generate")
     
-    # La generazione è lo step finale
     workflow.add_edge("generate", END)
 
     return workflow.compile()
@@ -40,6 +35,13 @@ def main():
     st.set_page_config(page_title="DIEMbot", page_icon="🎓", layout="centered")
     st.title("🎓 DIEMbot")
     st.caption("Assistente virtuale ufficiale del DIEM – Università di Salerno")
+
+    if "current_model" not in st.session_state:
+        st.session_state.current_model = "gemini-3.1-flash-lite"
+
+    if "pending_toast" in st.session_state:
+        st.toast(st.session_state.pending_toast, icon="🔄")
+        del st.session_state.pending_toast
 
     if "retriever" not in st.session_state:
         with st.spinner("Caricamento del database della conoscenza..."):
@@ -53,7 +55,21 @@ def main():
     
     with st.sidebar:
         st.header("Impostazioni")
+        model_options = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash", "mistral-nemo"]
+        current_idx = model_options.index(st.session_state.current_model) if st.session_state.current_model in model_options else 0
+        
+        selected_model = st.selectbox(
+            "Modello in uso", 
+            options=model_options, 
+            index=current_idx
+        )
+        
+        if selected_model != st.session_state.current_model:
+            st.session_state.current_model = selected_model
+            st.rerun()
+        
         show_sources = st.toggle("Mostra fonti estratte", value=True)
+        
         if st.button("🗑️ Cancella chat", use_container_width=True):
             st.session_state.messages = []
             st.rerun()
@@ -81,7 +97,13 @@ def main():
 
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
+            
+            if msg["role"] == "assistant":
+                model_name = msg.get("model_used", "Sconosciuto")
+                st.markdown(get_info_icon_html(model_name), unsafe_allow_html=True)
+            
             st.markdown(msg["content"])
+            
             if msg["role"] == "assistant" and show_sources and msg.get("sources"):
                 with st.expander("📄 Fonti consultate"):
                     for src in msg["sources"]:
@@ -97,7 +119,6 @@ def main():
         del st.session_state.pending_question
 
     if user_input:
-        # 1. Memorizziamo il messaggio utente
         st.session_state.messages.append({"role": "user", "content": user_input})
         with st.chat_message("user"):
             st.markdown(user_input)
@@ -107,34 +128,40 @@ def main():
                 initial_state = {
                     "question": user_input, 
                     "chat_history": st.session_state.messages[:-1], 
-                    "retry_count": 0
+                    "retry_count": 0,
+                    "current_model": st.session_state.current_model
                 }
                 
                 try:
-                    # --- TENTATIVO DI ESECUZIONE ---
                     final_state = rag_app.invoke(initial_state)
                     
                     full_response = final_state["generation"]
                     sources_list = final_state.get("sources", [])
-
-                    st.markdown(full_response)
+                    used_model = final_state.get("model_used", st.session_state.current_model)
                     
-                    if show_sources and sources_list:
-                        with st.expander("📄 Fonti consultate"):
-                            for src in sources_list:
-                                st.caption(f"• {src}")
-
-                    # Memorizziamo la risposta solo se tutto è andato a buon fine
                     st.session_state.messages.append({
                         "role": "assistant",
                         "content": full_response,
-                        "sources": sources_list
+                        "sources": sources_list,
+                        "model_used": used_model
                     })
+                    
+                    # 2. Controllo Fallback
+                    if used_model != st.session_state.current_model:
+                        st.session_state.pending_toast = f"Fallback attivato! Passaggio da {st.session_state.current_model} a {used_model}"
+                        st.session_state.current_model = used_model
+                        st.rerun()
+                    else:
+                        st.markdown(get_info_icon_html(used_model), unsafe_allow_html=True)
+                        
+                        st.markdown(full_response)
+                        
+                        if show_sources and sources_list:
+                            with st.expander("📄 Fonti consultate"):
+                                for src in sources_list:
+                                    st.caption(f"• {src}")
 
                 except Exception as e:
-                    # --- DEBUG TEMPORANEO ---
-                    st.error(f"🛠️ ERRORE TECNICO REALE: {str(e)}")
-                    # ------------------------
 
                     error_msg = str(e).lower()
                     
