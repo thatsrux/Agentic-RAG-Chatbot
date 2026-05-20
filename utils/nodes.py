@@ -10,13 +10,13 @@ def domain_guard_node(state: RAGState):
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", DOMAIN_PROMPT),
-        ("human", f"Domanda utente: {question}")
+        ("human", "Domanda utente: {question}")
     ])
     
     chain = prompt | load_llm() | JsonOutputParser()
     
     try:
-        result = chain.invoke({})
+        result = chain.invoke({"question": question}) 
         in_domain = result.get("in_domain", "si").lower()
     except Exception:
         in_domain = "si"
@@ -54,13 +54,17 @@ def generate_node(state: RAGState):
 def grade_generation_node(state: RAGState):
     prompt = ChatPromptTemplate.from_messages([
         ("system", GRADER_PROMPT),
-        ("human", f"Contesto: {state['context']}\n\nRisposta da valutare: {state['generation']}\n\nDomanda utente: {state['question']}")
+        ("human", "Contesto: {context}\n\nRisposta da valutare: {generation}\n\nDomanda utente: {question}")
     ])
     
     chain = prompt | load_llm() | JsonOutputParser()
     
     try:
-        score = chain.invoke({})
+        score = chain.invoke({
+            "context": state["context"],
+            "generation": state["generation"],
+            "question": state["question"]
+        })
         grade = score.get("binary_score", "no").lower()
     except Exception:
         grade = "no"
@@ -73,10 +77,10 @@ def rewrite_node(state: RAGState):
     
     prompt = ChatPromptTemplate.from_messages([
         ("system", REWRITE_PROMPT),
-        ("human", f"Domanda originale: {state['question']}")
+        ("human", "Domanda originale: {question}")
     ])
     
-    rewritten_question = (prompt | load_llm() | StrOutputParser()).invoke({})
+    rewritten_question = (prompt | load_llm() | StrOutputParser()).invoke({"question": state["question"]})
     return {"question": rewritten_question, "retry_count": current_retries + 1}
 
 def fallback_node(state: RAGState):
@@ -92,4 +96,8 @@ def route_after_domain(state: RAGState):
 def route_after_grade(state: RAGState):
     if state.get("grade") == "si":
         return "useful"
-    return "rewrite" if state.get("retry_count", 0) < MAX_RETRIES else "max_retries"
+    
+    if state.get("retry_count", 0) < MAX_RETRIES:
+        return "rewrite"
+    else:
+        return "max_retries"

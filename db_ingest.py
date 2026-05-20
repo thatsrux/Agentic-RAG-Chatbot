@@ -7,24 +7,16 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import MarkdownTextSplitter, RecursiveCharacterTextSplitter
 from langchain_classic.retrievers.parent_document_retriever import ParentDocumentRetriever
 from langchain_classic.storage import LocalFileStore, create_kv_docstore
-
 from utils.config import device
 
 # --- CONFIGURAZIONE ---
 KB_FILE = "knowledge/knowledge_base.pkl"
 VS_DIR = "knowledge/vectorstores"
 
-# WEB
-WEB_CHILD_SIZE = 800
-WEB_CHILD_OVERLAP = 80
-WEB_PARENT_SIZE = 3000
-WEB_PARENT_OVERLAP = 300
-
-# PDF
-PDF_CHILD_SIZE = 800
-PDF_CHILD_OVERLAP = 80
-PDF_PARENT_SIZE = 3000
-PDF_PARENT_OVERLAP = 300
+WEB_CHILD_SIZE, WEB_CHILD_OVERLAP = 800, 80
+WEB_PARENT_SIZE, WEB_PARENT_OVERLAP = 3000, 300
+PDF_CHILD_SIZE, PDF_CHILD_OVERLAP = 800, 80
+PDF_PARENT_SIZE, PDF_PARENT_OVERLAP = 3000, 300
 
 os.makedirs(VS_DIR, exist_ok=True)
 
@@ -33,33 +25,15 @@ def get_embedding_model():
     return HuggingFaceEmbeddings(
         model_name="BAAI/bge-m3", 
         model_kwargs={"device": device},
-        encode_kwargs={
-            "normalize_embeddings": True,
-            "batch_size": 64
-        }
+        encode_kwargs={"normalize_embeddings": True, "batch_size": 128}
     )
 
 def universal_markdown_cleaner(text: str) -> str:
-    """
-    Pulisce e normalizza il Markdown generato dagli scraper per 
-    aiutare il Text Splitter a tagliare nei punti giusti.
-    """
-    if not text:
-        return ""
-
-    # 1. RIMOZIONE URL (SICURA): Rimuove i link MA ignora le immagini
+    if not text: return ""
     text = re.sub(r'(?<!\!)\[([^\]]+)\]\([^)]+\)', r'\1', text)
-    
-    # 2. SALVATAGGIO TABELLE: Inserisce \n\n se una riga finisce con '|' e la successiva ha testo
     text = re.sub(r'(\|\s*)\n([a-zA-Z0-9\[])', r'\1\n\n\2', text)
-
-    # 3. NORMALIZZAZIONE DEI TITOLI: Assicura un solo \n\n prima di un titolo
     text = re.sub(r'\n+#+\s+', r'\n\n# ', text)
-    
-    # 4. PULIZIA FINALE: Collassa i ritorni a capo eccessivi a un massimo di due (\n\n)
-    text = re.sub(r'\n{3,}', r'\n\n', text)
-    
-    return text
+    return re.sub(r'\n{3,}', r'\n\n', text)
 
 def main():
     if not os.path.exists(KB_FILE):
@@ -69,10 +43,7 @@ def main():
     with open(KB_FILE, "rb") as f:
         all_docs = pickle.load(f)
 
-    web_docs = []
-    pdf_docs = []
-    excel_docs = []
-
+    web_docs, pdf_docs = [], []
     for d in all_docs:
         if d.metadata.get("type") == "web":
             if len(d.page_content.strip()) > 100:
@@ -80,140 +51,51 @@ def main():
                 web_docs.append(d)
         elif d.metadata.get("type") == "pdf":
             pdf_docs.append(d)
-        elif d.metadata.get("type") == "excel":
-            if len(d.page_content.strip()) > 50:
-                d.page_content = universal_markdown_cleaner(d.page_content)
-                excel_docs.append(d)
 
     emb = get_embedding_model()
 
     # ==========================================
-    # 1. Indicizzazione WEB (FAISS + Parent-Child)
+    # 1. Indicizzazione WEB
     # ==========================================
-    print("\n[WEB] Inizio indicizzazione Parent-Child per il Web...")
-    
-    web_child_splitter = MarkdownTextSplitter(
-        chunk_size=WEB_CHILD_SIZE, 
-        chunk_overlap=WEB_CHILD_OVERLAP
-    )
-    web_parent_splitter = MarkdownTextSplitter(
-        chunk_size=WEB_PARENT_SIZE, 
-        chunk_overlap=WEB_PARENT_OVERLAP
-    )
-
-    faiss_web_path = os.path.join(VS_DIR, "faiss_web_child")
-    docstore_web_path = os.path.join(VS_DIR, "docstore_web")
-    
+    print("\n[WEB] Indicizzazione")
+    faiss_web_path, docstore_web_path = os.path.join(VS_DIR, "faiss_web_child"), os.path.join(VS_DIR, "docstore_web")
     if os.path.exists(faiss_web_path): shutil.rmtree(faiss_web_path)
     if os.path.exists(docstore_web_path): shutil.rmtree(docstore_web_path)
 
-    # Inizializza FAISS Web con il token __dummy__
-    web_child_vs = FAISS.from_texts(["__dummy__"], emb)
-    web_parent_store = create_kv_docstore(LocalFileStore(docstore_web_path))
-
     web_retriever = ParentDocumentRetriever(
-        vectorstore=web_child_vs,
-        docstore=web_parent_store,
-        child_splitter=web_child_splitter,
-        parent_splitter=web_parent_splitter,
+        vectorstore=FAISS.from_texts(["__dummy__"], emb),
+        docstore=create_kv_docstore(LocalFileStore(docstore_web_path)),
+        child_splitter=MarkdownTextSplitter(chunk_size=WEB_CHILD_SIZE, chunk_overlap=WEB_CHILD_OVERLAP),
+        parent_splitter=MarkdownTextSplitter(chunk_size=WEB_PARENT_SIZE, chunk_overlap=WEB_PARENT_OVERLAP),
     )
-
-    batch_size_web = 5
-    total_web_batches = (len(web_docs) + batch_size_web - 1) // batch_size_web
-    print(f"  [WEB] Trovati {len(web_docs)} documenti originali. Suddivisi in {total_web_batches} blocchi.")
-
-    for i in range(0, len(web_docs), batch_size_web):
-        batch = web_docs[i : i + batch_size_web]
-        current_batch = (i // batch_size_web) + 1
-        print(f"  [WEB] Elaborazione batch {current_batch}/{total_web_batches}...")
-        web_retriever.add_documents(batch)
-
-    web_child_vs.save_local(faiss_web_path)
-    print("\n[WEB] Indicizzazione Parent-Child completata con successo.")
+    
+    batch_size = 10
+    for i in range(0, len(web_docs), batch_size):
+        print(f"  [WEB] Batch {(i // batch_size) + 1}/{(len(web_docs) + batch_size - 1) // batch_size}...")
+        web_retriever.add_documents(web_docs[i : i + batch_size])
+    web_retriever.vectorstore.save_local(faiss_web_path)
 
     # ==========================================
-    # 2. Indicizzazione PDF (FAISS + Parent-Child)
+    # 2. Indicizzazione PDF
     # ==========================================
-    print("\n[PDF] Inizio indicizzazione Parent-Child per i PDF...")
-    
-    pdf_child_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=PDF_CHILD_SIZE, 
-        chunk_overlap=PDF_CHILD_OVERLAP,
-        separators=["\n\n", ". ", "\n", " ", ""]
-    )
-    pdf_parent_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=PDF_PARENT_SIZE, 
-        chunk_overlap=PDF_PARENT_OVERLAP,
-        separators=["\n\n", ". ", "\n", " ", ""]
-    )
-
-    faiss_pdf_path = os.path.join(VS_DIR, "faiss_pdf_child")
-    docstore_pdf_path = os.path.join(VS_DIR, "docstore_pdf")
-    
+    print("\n[PDF] Indicizzazione Parent-Child per i PDF...")
+    faiss_pdf_path, docstore_pdf_path = os.path.join(VS_DIR, "faiss_pdf_child"), os.path.join(VS_DIR, "docstore_pdf")
     if os.path.exists(faiss_pdf_path): shutil.rmtree(faiss_pdf_path)
     if os.path.exists(docstore_pdf_path): shutil.rmtree(docstore_pdf_path)
 
-    child_vs = FAISS.from_texts(["__dummy__"], emb)
-    parent_store = create_kv_docstore(LocalFileStore(docstore_pdf_path))
-
     pdf_retriever = ParentDocumentRetriever(
-        vectorstore=child_vs,
-        docstore=parent_store,
-        child_splitter=pdf_child_splitter,
-        parent_splitter=pdf_parent_splitter,
+        vectorstore=FAISS.from_texts(["__dummy__"], emb),
+        docstore=create_kv_docstore(LocalFileStore(docstore_pdf_path)),
+        child_splitter=RecursiveCharacterTextSplitter(chunk_size=PDF_CHILD_SIZE, chunk_overlap=PDF_CHILD_OVERLAP, separators=["\n\n", ". ", "\n", " ", ""]),
+        parent_splitter=RecursiveCharacterTextSplitter(chunk_size=PDF_PARENT_SIZE, chunk_overlap=PDF_PARENT_OVERLAP, separators=["\n\n", ". ", "\n", " ", ""]),
     )
+    
+    for i in range(0, len(pdf_docs), batch_size):
+        print(f"  [PDF] Batch {(i // batch_size) + 1}/{(len(pdf_docs) + batch_size - 1) // batch_size}...")
+        pdf_retriever.add_documents(pdf_docs[i : i + batch_size])
+    pdf_retriever.vectorstore.save_local(faiss_pdf_path)
 
-    batch_size_pdf = 5
-    total_pdf_batches = (len(pdf_docs) + batch_size_pdf - 1) // batch_size_pdf
-    print(f"  [PDF] Trovati {len(pdf_docs)} documenti originali. Suddivisi in {total_pdf_batches} blocchi.")
-
-    for i in range(0, len(pdf_docs), batch_size_pdf):
-        batch = pdf_docs[i : i + batch_size_pdf]
-        current_batch = (i // batch_size_pdf) + 1
-        print(f"  [PDF] Elaborazione batch {current_batch}/{total_pdf_batches}...")
-        pdf_retriever.add_documents(batch)
-
-    child_vs.save_local(faiss_pdf_path)
-    print("\n[PDF] Indicizzazione Parent-Child completata con successo.")
-
-
-    if excel_docs:
-        print("\n[EXCEL] Inizio indicizzazione Parent-Child per i file Excel (EasyRoom)...")
-        
-        # Usiamo il MarkdownTextSplitter per non rompere le tabelle
-        excel_child_splitter = MarkdownTextSplitter(chunk_size=800, chunk_overlap=80)
-        excel_parent_splitter = MarkdownTextSplitter(chunk_size=3000, chunk_overlap=300)
-
-        faiss_excel_path = os.path.join(VS_DIR, "faiss_excel_child")
-        docstore_excel_path = os.path.join(VS_DIR, "docstore_excel")
-        
-        if os.path.exists(faiss_excel_path): shutil.rmtree(faiss_excel_path)
-        if os.path.exists(docstore_excel_path): shutil.rmtree(docstore_excel_path)
-
-        excel_child_vs = FAISS.from_texts(["__dummy__"], emb)
-        excel_parent_store = create_kv_docstore(LocalFileStore(docstore_excel_path))
-
-        excel_retriever = ParentDocumentRetriever(
-            vectorstore=excel_child_vs,
-            docstore=excel_parent_store,
-            child_splitter=excel_child_splitter,
-            parent_splitter=excel_parent_splitter,
-        )
-
-        batch_size_excel = 5
-        total_excel_batches = (len(excel_docs) + batch_size_excel - 1) // batch_size_excel
-        print(f"  [EXCEL] Trovati {len(excel_docs)} documenti orario. Suddivisi in {total_excel_batches} blocchi.")
-
-        for i in range(0, len(excel_docs), batch_size_excel):
-            batch = excel_docs[i : i + batch_size_excel]
-            current_batch = (i // batch_size_excel) + 1
-            print(f"  [EXCEL] Elaborazione batch {current_batch}/{total_excel_batches}...")
-            excel_retriever.add_documents(batch)
-
-        excel_child_vs.save_local(faiss_excel_path)
-        print("\n[EXCEL] Indicizzazione completata con successo.")
-
-    print("\n[FINISH] Tutte le indicizzazioni FAISS (Web, PDF, Excel) sono state completate con successo!")
+    print("\n[FINISH] Tutte le indicizzazioni FAISS (Web e PDF) completate con successo!")
 
 if __name__ == "__main__":
     main()
