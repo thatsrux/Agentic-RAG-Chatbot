@@ -23,24 +23,50 @@ def _sep(color, label):
     print(f"\n{BOLD}{color}{'━'*20} {label} {'━'*20}{RESET}")
 # ───────────────────────────────────────────────────────────
 
+# --- FIX GEMINI: Funzione di estrazione sicura ---
+def _safe_extract_string(output) -> str:
+    """Previene l'errore 'list object has no attribute strip'."""
+    if isinstance(output, list):
+        if len(output) > 0:
+            if isinstance(output[0], dict):
+                return str(output[0].get("text", ""))
+            return str(output[0])
+        return ""
+    return str(output)
+# -------------------------------------------------
+
 def condense_question_node(state: RAGState):
     question = state["question"]
-    chat_history = state.get("chat_history", "")
+    history_list = state.get("chat_history", [])
+    
     _sep(CYAN, "CONDENSE QUESTION")
     _log(CYAN, "CONDENSE", f"INPUT  question : {question}")
 
-    if not chat_history.strip():
+    # Se la lista è vuota, non c'è storia da condensare
+    if not history_list:
         _log(CYAN, "CONDENSE", "Nessuna history → skip LLM")
         return {"question": question}
+
+    # Trasformiamo la lista dei dizionari in una stringa leggibile dall'LLM
+    # (Prendiamo solo gli ultimi 4 messaggi per mantenere il contesto fresco)
+    recent_history = history_list[-4:] if len(history_list) > 4 else history_list
+    chat_history_str = ""
+    for msg in recent_history:
+        role = "Studente" if msg["role"] == "user" else "DIEMbot"
+        chat_history_str += f"{role}: {msg['content']}\n"
 
     prompt = PromptTemplate.from_template(CONDENSE_PROMPT)
     chain = prompt | load_llm() | StrOutputParser()
 
     try:
-        new_question = chain.invoke({
-            "history": chat_history,
+        raw_output = chain.invoke({
+            "history": chat_history_str,  # Passiamo la stringa formattata
             "query": question
-        }).strip()
+        })
+        
+        # Estraiamo la stringa in modo sicuro usando la funzione scudo
+        new_question = _safe_extract_string(raw_output).strip()
+        
         _log(CYAN, "CONDENSE", f"OUTPUT rewritten : {new_question}")
         return {"question": new_question}
     except Exception as e:
@@ -60,8 +86,10 @@ def domain_guard_node(state: RAGState):
     chain = prompt | load_llm() | StrOutputParser()
 
     try:
-        result = chain.invoke({}).strip().lower()
-        in_domain = "no" if "no" in result[:5] else "si" # Controlla se inizia con NO
+        raw_output = chain.invoke({})
+        # Estraiamo la stringa in modo sicuro prima di manipolarla
+        result = _safe_extract_string(raw_output).strip().lower()
+        in_domain = "no" if "no" in result[:5] else "si" 
     except Exception:
         in_domain = "si" # Nel dubbio, fa passare
 
@@ -93,7 +121,10 @@ def generate_node(state: RAGState):
     _log(MAGENTA, "GENERATE", f"INPUT  question           : {state['question']}")
     
     chain = RAG_PROMPT | load_llm() | StrOutputParser()
-    response = chain.invoke({"context": state["context"], "question": state["question"]})
+    raw_output = chain.invoke({"context": state["context"], "question": state["question"]})
+    
+    # Estraiamo la stringa in modo sicuro
+    response = _safe_extract_string(raw_output)
     
     _log(MAGENTA, "GENERATE", f"OUTPUT response (300 car) : {response[:300]}")
     return {"generation": response}
