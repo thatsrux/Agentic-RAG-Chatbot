@@ -4,7 +4,8 @@ from langgraph.graph import StateGraph, START, END
 from utils.config import RAGState
 from utils.nodes import *
 from utils.retriever import HybridRetriever
-from utils.style import get_info_icon_html, get_global_css
+from utils.style import get_info_icon_html, get_global_css, get_welcome_screen_html, get_header_html
+from utils.utils import sample_questions
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -33,9 +34,10 @@ def build_graph():
 
 def main():
     st.set_page_config(page_title="DIEMbot", page_icon="🎓", layout="centered")
+
+    # --- INIEZIONE GRAFICA COMPLETA DA STYLE.PY ---
     st.markdown(get_global_css(), unsafe_allow_html=True)
-    st.title("🎓 DIEMbot")
-    st.caption("Assistente virtuale ufficiale del DIEM – Università di Salerno")
+    st.markdown(get_header_html(), unsafe_allow_html=True)
 
     if "current_model" not in st.session_state:
         st.session_state.current_model = "gemini-3.1-flash-lite"
@@ -76,39 +78,9 @@ def main():
             st.rerun()
         st.divider()
         st.markdown("**Esempi di domande:**")
-        sample_questions = [
-            "Quali sono i corsi offerti dal DIEM?",
-            "Ho ottenuto un punteggio di 18 al TOLC. Posso iscrivermi?",
-            "Quali sono i requisiti di ammissione per il Master in Ingegneria dell'Informazione per la Medicina Digitale?",
-            "Qual è il programma del corso di Ingegneria del Software?",
-            "Quali sono gli orari di ricevimento del Professor Capuano?",
-            "Dove si trova l'aula 126?",
-            "La mia media è 28,8. Qual è il voto finale massimo che posso ottenere?",
-            "Chi è responsabile dell'internazionalizzazione presso DIEM?",
-            "Quali opportunità di mobilità internazionale sono disponibili?",
-            "Dove si trova il DIEM?",
-            "Quali aree di ricerca sono attive al DIEM?",
-            "Quali laboratori sono disponibili al DIEM?",
-            "Quali attrezzature sono disponibili nel Laboratorio di Robotica?",
-            "Chi sono i membri della Commissione Paritaria Studenti-Docenti?"
-        ]
         for q in sample_questions:
             if st.button(q, use_container_width=True):
                 st.session_state.pending_question = q
-
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            
-            if msg["role"] == "assistant":
-                model_name = msg.get("model_used", "Sconosciuto")
-                st.markdown(get_info_icon_html(model_name), unsafe_allow_html=True)
-            
-            st.markdown(msg["content"])
-            
-            if msg["role"] == "assistant" and show_sources and msg.get("sources"):
-                with st.expander("📄 Fonti consultate"):
-                    for src in msg["sources"]:
-                        st.caption(f"• {src}")
 
     chat_input = st.chat_input("Chiedimi qualcosa sul DIEM...")
     user_input = None
@@ -119,11 +91,28 @@ def main():
         user_input = st.session_state.pending_question
         del st.session_state.pending_question
 
+    should_generate = False
     if user_input:
         st.session_state.messages.append({"role": "user", "content": user_input})
-        with st.chat_message("user"):
-            st.markdown(user_input)
+        should_generate = True
 
+    if not st.session_state.messages:
+        st.markdown(get_welcome_screen_html(), unsafe_allow_html=True)
+    else:
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                if msg["role"] == "assistant":
+                    model_name = msg.get("model_used", "Sconosciuto")
+                    st.markdown(get_info_icon_html(model_name), unsafe_allow_html=True)
+                
+                st.markdown(msg["content"])
+                
+                if msg["role"] == "assistant" and show_sources and msg.get("sources"):
+                    with st.expander("📄 Fonti consultate"):
+                        for src in msg["sources"]:
+                            st.caption(f"• {src}")
+
+    if should_generate:
         with st.chat_message("assistant"):
             with st.spinner("DIEMbot sta elaborando la richiesta..."):
                 initial_state = {
@@ -147,14 +136,12 @@ def main():
                         "model_used": used_model
                     })
                     
-                    # 2. Controllo Fallback
                     if used_model != st.session_state.current_model:
                         st.session_state.pending_toast = f"Fallback attivato! Passaggio da {st.session_state.current_model} a {used_model}"
                         st.session_state.current_model = used_model
                         st.rerun()
                     else:
                         st.markdown(get_info_icon_html(used_model), unsafe_allow_html=True)
-                        
                         st.markdown(full_response)
                         
                         if show_sources and sources_list:
@@ -163,15 +150,14 @@ def main():
                                     st.caption(f"• {src}")
 
                 except Exception as e:
-
                     error_msg = str(e).lower()
-                    
                     if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
                         st.warning("⏳ **Troppe richieste!** Il Dipartimento sta facendo molte domande a DIEMbot. Per favore, attendi circa un minuto e riprova.")
                     else:
                         st.error("❌ Ops, si è verificato un errore di connessione con il modello AI. Riprova tra un attimo.")
                     
                     st.session_state.messages.pop()
+                    st.rerun()
 
 if __name__ == "__main__":
     main()

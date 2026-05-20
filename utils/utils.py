@@ -1,4 +1,3 @@
-# utils/utils.py
 import os
 import streamlit as st
 from langchain_ollama import ChatOllama
@@ -64,3 +63,20 @@ def format_context(docs):
         source = doc.metadata.get("source", "Fonte sconosciuta")
         parts.append(f"[Documento {i+1} | Fonte: {source}]\n{doc.page_content}")
     return "\n\n---\n\n".join(parts)
+
+sample_questions = [
+            "Quali sono i corsi offerti dal DIEM?",
+            "Ho ottenuto un punteggio di 18 al TOLC. Posso iscrivermi?",
+            "Quali sono i requisiti di ammissione per il Master in Ingegneria dell'Informazione per la Medicina Digitale?",
+            "Qual è il programma del corso di Ingegneria del Software?",
+            "Quali sono gli orari di ricevimento del Professor Capuano?",
+            "Dove si trova l'aula 126?",
+            "La mia media è 28,8. Qual è il voto finale massimo che posso ottenere?",
+            "Chi è responsabile dell'internazionalizzazione presso DIEM?",
+            "Quali opportunità di mobilità internazionale sono disponibili?",
+            "Dove si trova il DIEM?",
+            "Quali aree di ricerca sono attive al DIEM?",
+            "Quali laboratori sono disponibili al DIEM?",
+            "Quali attrezzature sono disponibili nel Laboratorio di Robotica?",
+            "Chi sono i membri della Commissione Paritaria Studenti-Docenti?"
+        ]
