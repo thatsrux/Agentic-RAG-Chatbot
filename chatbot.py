@@ -35,7 +35,6 @@ def build_graph():
 def main():
     st.set_page_config(page_title="DIEMbot", page_icon="🎓", layout="centered")
 
-    # --- INIEZIONE GRAFICA COMPLETA DA STYLE.PY ---
     st.markdown(get_global_css(), unsafe_allow_html=True)
     st.markdown(get_header_html(), unsafe_allow_html=True)
 
