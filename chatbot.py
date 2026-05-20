@@ -57,7 +57,7 @@ def main():
     
     with st.sidebar:
         st.header("Impostazioni")
-        model_options = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash", "mistral-nemo"]
+        model_options = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash", OLLAMA_MODEL]
         current_idx = model_options.index(st.session_state.current_model) if st.session_state.current_model in model_options else 0
         
         selected_model = st.selectbox(

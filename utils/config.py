@@ -4,8 +4,8 @@ from langchain_core.prompts import ChatPromptTemplate
 import torch
 device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
-#OLLAMA_MODEL = "llama3.1"
-OLLAMA_MODEL = "mistral-nemo"
+OLLAMA_MODEL = "llama3.1"
+#OLLAMA_MODEL = "mistral-nemo"
 
 MAX_RETRIES = 2
 
