@@ -15,7 +15,7 @@ def load_llm(selected_model: str = "gemini-3.1-flash-lite"):
         model="gemini-3.1-flash-lite",
         temperature=0.1,
         max_output_tokens=1024,
-        timeout=15.0,
+        timeout=30.0,
         max_retries=0
     )
     
@@ -23,7 +23,7 @@ def load_llm(selected_model: str = "gemini-3.1-flash-lite"):
         model="gemini-3.5-flash",
         temperature=0.1,
         max_output_tokens=1024,
-        timeout=15.0,
+        timeout=30.0,
         max_retries=0
     )
     
@@ -31,7 +31,7 @@ def load_llm(selected_model: str = "gemini-3.1-flash-lite"):
         model="gemini-2.5-flash", 
         temperature=0.1,
         max_output_tokens=1024,
-        timeout=15.0,
+        timeout=30.0,
         max_retries=0
     )
     
