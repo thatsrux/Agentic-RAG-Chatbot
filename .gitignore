@@ -8,4 +8,4 @@ knowledge_old/
 
 llm_env/
 
-.streamlit
+.streamlit/secrets.toml
