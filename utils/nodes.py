@@ -3,6 +3,9 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from utils.config import *
 from utils.utils import load_llm, format_context
+from utils.retriever import HybridRetriever
+from langgraph.graph import StateGraph, START, END
+from utils.config import RAGState
 
 RESET   = "\033[0m"
 BOLD    = "\033[1m"
@@ -94,13 +97,13 @@ def domain_guard_node(state: RAGState):
         }
     return {"is_in_domain": "si"}
 
-
+retriever = HybridRetriever()
 def retrieve_node(state: RAGState):
     question = state["question"]
     _sep(GREEN, "RETRIEVE")
     _log(GREEN, "RETRIEVE", f"INPUT  question   : {question}")
     
-    docs = st.session_state.retriever.retrieve(question)
+    docs = retriever.retrieve(question)
     _log(GREEN, "RETRIEVE", f"OUTPUT docs count : {len(docs)}")
     
     context = format_context(docs)
@@ -127,3 +130,25 @@ def generate_node(state: RAGState):
 
 def route_after_domain(state: RAGState):
     return "out_of_domain" if state.get("is_in_domain") == "no" else "in_domain"
+
+def build_graph():
+    workflow = StateGraph(RAGState)
+
+    workflow.add_node("condense_question", condense_question_node)
+    workflow.add_node("domain_guard", domain_guard_node)
+    workflow.add_node("retrieve", retrieve_node)
+    workflow.add_node("generate", generate_node)
+
+    workflow.add_edge(START, "condense_question")
+    workflow.add_edge("condense_question", "domain_guard")
+
+    workflow.add_conditional_edges(
+        "domain_guard", route_after_domain,
+        {"in_domain": "retrieve", "out_of_domain": END}
+    )
+    
+    workflow.add_edge("retrieve", "generate")
+    
+    workflow.add_edge("generate", END)
+
+    return workflow.compile()
