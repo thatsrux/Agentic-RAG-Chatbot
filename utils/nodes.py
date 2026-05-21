@@ -1,31 +1,26 @@
+import json
+import re
+import requests
 import streamlit as st
+from bs4 import BeautifulSoup
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from utils.config import *
 from utils.utils import load_llm, format_context
-from langchain_community.tools import DuckDuckGoSearchRun
-
-from langchain_community.tools import DuckDuckGoSearchRun
-
-from langchain_community.tools import DuckDuckGoSearchRun
-from langchain_core.prompts import PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-
-from langchain_community.tools import DuckDuckGoSearchRun
-from langchain_core.prompts import PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-
+from utils.config import keyword_prompt
+from crawling import KEYWORDS, CORSI_DIEM_URLS
+from langgraph.graph import StateGraph, START, END
+from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
 
 RESET   = "\033[0m"
 BOLD    = "\033[1m"
-CYAN    = "\033[96m"    # CONDENSE
-YELLOW  = "\033[93m"   # DOMAIN_GUARD
-GREEN   = "\033[92m"   # RETRIEVE
-BLUE    = "\033[94m"   # DOC_GRADE
-MAGENTA = "\033[95m"   # GENERATE
-RED     = "\033[91m"   # REWRITE / FALLBACK
-ORANGE  = "\033[33m"   # ANSWER_GRADE
-GRAY    = "\033[90m"   # ROUTE
+CYAN    = "\033[96m"
+YELLOW  = "\033[93m"
+GREEN   = "\033[92m"
+BLUE    = "\033[94m"
+MAGENTA = "\033[95m"
+RED     = "\033[91m"
+GRAY    = "\033[90m"
 
 def _log(color, tag, msg):
     print(f"{BOLD}{color}[{tag}]{RESET} {color}{msg}{RESET}")
@@ -50,9 +45,9 @@ def condense_question_node(state: RAGState):
     _sep(CYAN, "CONDENSE QUESTION")
     _log(CYAN, "CONDENSE", f"INPUT  question : {question}")
 
-    if not history_list:
-        _log(CYAN, "CONDENSE", "Nessuna history → skip LLM")
-        return {"question": question}
+    # if not history_list:
+    #     _log(CYAN, "CONDENSE", "Nessuna history → skip LLM")
+    #     return {"question": question}
 
     recent_history = history_list[-4:] if len(history_list) > 4 else history_list
     chat_history_str = ""
@@ -140,62 +135,26 @@ def generate_node(state: RAGState):
 def route_after_domain(state: RAGState):
     return "out_of_domain" if state.get("is_in_domain") == "no" else "in_domain"
 
-import json
-import re
-import requests
-from bs4 import BeautifulSoup
-from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
-from langchain_core.prompts import PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-
-import json
-import re
-import requests
-from bs4 import BeautifulSoup
-from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
-from langchain_core.prompts import PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-
 def web_search_node(state: RAGState):
-    _sep(RED, "WEB SEARCH FALLBACK (SMART SCOPE)")
+    _sep(RED, "WEB SEARCH")
     question = state["question"]
-    
-    # --- KEYWORDS PER IL FILTRAGGIO DEL CONTENUTO ---
-    KEYWORDS = ["DIEM", "DIPARTIMENTO DI INGEGNERIA DELL'INFORMAZIONE", "INGEGNERIA INFORMATICA"]
-    
-    # --- DEFINIZIONE DEI VINCOLI DI DOMINIO STRICT (DALLE TUE LISTE) ---
-    CORSI_DIEM = [
-        "corsi.unisa.it/ingegneria-dell-informazione-per-la-medicina-digitale",
-        "corsi.unisa.it/ingegneria-informatica",
-        "corsi.unisa.it/electrical-engineering-for-digital-energy",
-        "corsi.unisa.it/information-Engineering-for-digital-medicine",
-        "corsi.unisa.it/0650107303300001",
-        "corsi.unisa.it/DOT18CK8F9",
-        "corsi.unisa.it/photovoltaics",
-        "corsi.unisa.it/ingegneria-informatica-magistrale", 
-        "corsi.unisa.it/ingegneria-dell-informazione"       
-    ]
     
     def is_valid_url(url: str) -> bool:
         clean_url = url.replace("https://", "").replace("http://", "").replace("www.", "")
         
-        # 1. SALVAGUARDIA SCRAPER: Blocchiamo i file binari
         if clean_url.lower().endswith((".xls", ".xlsx", ".pdf", ".doc", ".docx")):
             return False
             
-        # 2. diem e docenti sono sempre sicuri come URL (il contenuto dei docenti lo filtriamo dopo)
         if "diem.unisa.it" in clean_url or "docenti.unisa.it" in clean_url:
             return True
             
-        # 3. corsi.unisa.it
         if "corsi.unisa.it" in clean_url:
             if "calendario-occupazione-spazi" in clean_url:
                 return False
             if "strutture-didattiche" in clean_url:
                 return True
-            return any(corso in clean_url for corso in CORSI_DIEM)
+            return any(corso in clean_url for corso in CORSI_DIEM_URLS)
             
-        # 4. easycourse.unisa.it
         if "easycourse.unisa.it" in clean_url:
             if "Dipartimento_di_" in clean_url and "dellInformazione" not in clean_url:
                 return False
@@ -203,29 +162,6 @@ def web_search_node(state: RAGState):
             
         return False
 
-    # 1. ROUTING DINAMICO POTENZIATO
-    keyword_prompt = PromptTemplate.from_template(
-        """Sei un motore di routing avanzato per le ricerche del dipartimento DIEM dell'Università di Salerno.
-        Devi analizzare la domanda e decidere la query migliore e il SITO SPECIFICO in cui cercare.
-        
-        REGOLE TASSATIVE:
-        1. Aggiungi SEMPRE la parola "DIEM" oppure il nome del corso di laurea (es. "Ingegneria Informatica") alla query.
-        2. Se cerchi un ORARIO (easycourse), aggiungi SEMPRE "Ingegneria Informatica".
-        3. Se cerchi un'AULA o l'UBICAZIONE di un laboratorio, usa SEMPRE le parole "strutture didattiche".
-        
-        DOMINI A DISPOSIZIONE:
-        - "diem.unisa.it" : per organi, responsabili, avvisi, bandi.
-        - "corsi.unisa.it" : per aule, strutture didattiche, programmi.
-        - "docenti.unisa.it" : SOLO per nome e cognome di un professore.
-        - "easycourse.unisa.it" : per orari delle lezioni.
-        
-        Rispondi ESCLUSIVAMENTE con un JSON valido con questo formato:
-        {{"query": "parole chiave pulite", "site": "dominio scelto"}}
-        
-        Domanda: {question}
-        JSON:"""
-    )
-    
     keyword_chain = keyword_prompt | load_llm(state.get("current_model")) | StrOutputParser()
     
     try:
@@ -237,17 +173,15 @@ def web_search_node(state: RAGState):
         target_site = routing_data.get("site", "unisa.it")
         
     except Exception as e:
-        _log(RED, "WEB_SEARCH", f"Errore parsing JSON: {e}. Fallback su unisa.it generico.")
         search_query = f"{question} DIEM"
         target_site = "unisa.it"
         
     shielded_query = f"{search_query} site:{target_site}"
-    _log(RED, "WEB_SEARCH", f"Query inviata: {shielded_query} (Target forzato: {target_site})")
+    _log(RED, "WEB_SEARCH", f"INPUT  Query: {shielded_query} (Target: {target_site})")
     
     web_contexts = []
     source_urls = []
     
-    # 2. RICERCA E FILTRAGGIO PROGRAMMATICO
     try:
         wrapper = DuckDuckGoSearchAPIWrapper(max_results=25)
         search_results = wrapper.results(shielded_query, max_results=25)
@@ -261,14 +195,11 @@ def web_search_node(state: RAGState):
                     
                 target_url = res.get("link", "")
                 
-                # CONTROLLO 1: URL Valido?
                 if not is_valid_url(target_url):
-                    _log(GRAY, "WEB_FILTER", f"Scartato URL fuori perimetro: {target_url}")
                     continue
                     
                 snippet = res.get("snippet", "")
                 
-                # --- SCRAPING INTELLIGENTE E CONTROLLO CONTENUTO ---
                 try:
                     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
                     response = requests.get(target_url, headers=headers, timeout=5)
@@ -282,28 +213,20 @@ def web_search_node(state: RAGState):
                     main_content = soup.find(id="unisa-content") or soup.find(id="content") or soup
                     page_text = main_content.get_text(separator=' ', strip=True)
                     
-                    # --- CONTROLLO 2 (NOVITA'): Filtro Contenuto per i Docenti ---
                     if "docenti.unisa.it" in target_url:
                         testo_upper = page_text.upper()
                         if not any(kw in testo_upper for kw in KEYWORDS):
-                            _log(GRAY, "WEB_FILTER", f"Scartato docente NON-DIEM (dal testo): {target_url}")
-                            continue # Salta al prossimo risultato senza incrementare i count
+                            continue 
 
                     web_contexts.append(f"[Fonte: {target_url}]\nTesto: {page_text[:4000]}\n")
                     
                 except Exception as scrape_error:
-                    # Se lo scraping fallisce per un docente, è meglio scartarlo del tutto 
-                    # (perché lo snippet potrebbe fregarci)
                     if "docenti.unisa.it" in target_url:
-                        _log(GRAY, "WEB_FILTER", f"Scraping fallito per {target_url}, scartato per sicurezza.")
                         continue
                         
-                    _log(GRAY, "WEB_SCRAPE", f"Scraping fallito per {target_url}, uso lo snippet.")
                     web_contexts.append(f"[Fonte: {target_url}]\nSnippet: {snippet}\n")
                 
-                # Se arriviamo qui, il risultato ha superato TUTTI i controlli!
                 source_urls.append(f"Web: {target_url}")
-                _log(RED, "WEB_SEARCH", f"Risultato Valido {valid_results_count+1}: {target_url}")
                 valid_results_count += 1
         
         if valid_results_count == 0:
@@ -311,27 +234,19 @@ def web_search_node(state: RAGState):
             source_urls.append("Nessuna fonte web trovata")
             
     except Exception as e:
-        _log(RED, "WEB_SEARCH", f"Errore ricerca DuckDuckGo: {e}")
         web_contexts.append("Errore durante la connessione al motore di ricerca.")
         
     final_context = "\n---\n".join(web_contexts)
         
-    _sep(GRAY, "WEB SEARCH CONTEXT (TRONCATO)")
-    _log(GRAY, "WEB_CONTEXT", f"\n{final_context[:800]}...\n") 
-    _sep(GRAY, "------------------")
-        
-    # 3. GENERAZIONE RISPOSTA FINALE
     chain = ChatPromptTemplate.from_template(WEB_GENERATE_PROMPT) | load_llm(state.get("current_model"))
     ai_message = chain.invoke({"context": final_context, "question": question})
     
     response_text = _safe_extract_string(ai_message.content)
     
-    _sep(MAGENTA, "LLM WEB GENERATION")
-    _log(MAGENTA, "WEB_RESPONSE", f"\n{response_text}")
-    _sep(MAGENTA, "------------------")
-    
     if "mi dispiace" in response_text.lower() or not response_text:
         response_text = "Mi dispiace, ma non trovo questa informazione nei documenti del DIEM né sui canali ufficiali autorizzati."
+
+    _log(RED, "WEB_SEARCH", f"OUTPUT response: {response_text[:300]}")
 
     return {
         "generation": response_text, 
@@ -343,3 +258,34 @@ def route_after_generation(state: RAGState):
     if "[TRIGGER_WEB_SEARCH]" in generation:
         return "go_to_web"
     return "go_to_end"
+
+def build_graph():
+    workflow = StateGraph(RAGState)
+
+    workflow.add_node("condense_question", condense_question_node)
+    workflow.add_node("domain_guard", domain_guard_node)
+    workflow.add_node("retrieve", retrieve_node)
+    workflow.add_node("generate", generate_node)
+    workflow.add_node("web_search", web_search_node)
+
+    workflow.add_edge(START, "condense_question")
+    workflow.add_edge("condense_question", "domain_guard")
+
+    workflow.add_conditional_edges(
+        "domain_guard", route_after_domain,
+        {"in_domain": "retrieve", "out_of_domain": END}
+    )
+    
+    workflow.add_edge("retrieve", "generate")
+    
+    workflow.add_conditional_edges(
+        "generate", route_after_generation,
+        {
+            "go_to_web": "web_search",
+            "go_to_end": END
+        }
+    )
+    
+    workflow.add_edge("web_search", END)
+
+    return workflow.compile()

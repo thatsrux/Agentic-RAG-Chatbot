@@ -10,37 +10,6 @@ from utils.utils import sample_questions
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["OMP_NUM_THREADS"] = "1"
 
-def build_graph():
-    workflow = StateGraph(RAGState)
-
-    workflow.add_node("condense_question", condense_question_node)
-    workflow.add_node("domain_guard", domain_guard_node)
-    workflow.add_node("retrieve", retrieve_node)
-    workflow.add_node("generate", generate_node)
-    workflow.add_node("web_search", web_search_node)
-
-    workflow.add_edge(START, "condense_question")
-    workflow.add_edge("condense_question", "domain_guard")
-
-    workflow.add_conditional_edges(
-        "domain_guard", route_after_domain,
-        {"in_domain": "retrieve", "out_of_domain": END}
-    )
-    
-    workflow.add_edge("retrieve", "generate")
-    
-    workflow.add_conditional_edges(
-        "generate", route_after_generation,
-        {
-            "go_to_web": "web_search",
-            "go_to_end": END
-        }
-    )
-    
-    workflow.add_edge("web_search", END)
-
-    return workflow.compile()
-
 def main():
     st.set_page_config(page_title="DIEMbot", page_icon="🎓", layout="centered")
 
