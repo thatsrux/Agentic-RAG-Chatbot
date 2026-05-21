@@ -24,7 +24,7 @@ rag_app = build_graph()
 # ==========================================
 class OllamaJudge(DeepEvalBaseLLM):
     def __init__(self, model_name="mistral-nemo"):
-        self.model = ChatOllama(model=model_name, temperature=0)
+        self.model = ChatOllama(model=model_name, temperature=0, format="json")
 
     def load_model(self):
         return self.model
