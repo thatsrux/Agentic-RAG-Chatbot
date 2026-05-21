@@ -1,10 +1,8 @@
 import os
 import streamlit as st
-from langgraph.graph import StateGraph, START, END
-from utils.config import RAGState
 from utils.nodes import *
 from utils.retriever import HybridRetriever
-from utils.style import get_info_icon_html, get_global_css, get_welcome_screen_html, get_header_html
+from utils.style import *
 from utils.utils import sample_questions
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -76,7 +74,7 @@ def main():
     if not st.session_state.messages:
         st.markdown(get_welcome_screen_html(), unsafe_allow_html=True)
     else:
-        for msg in st.session_state.messages:
+        for idx, msg in enumerate(st.session_state.messages):
             with st.chat_message(msg["role"]):
                 if msg["role"] == "assistant":
                     model_name = msg.get("model_used", "Sconosciuto")
@@ -85,7 +83,7 @@ def main():
                 st.markdown(msg["content"])
                 
                 if msg["role"] == "assistant" and show_sources and msg.get("sources"):
-                    with st.expander("📄 Fonti consultate"):
+                    with st.expander("📄 Fonti consultate", expanded=False, key=f"source_{idx}"):
                         for src in msg["sources"]:
                             st.caption(f"• {src}")
 
@@ -157,10 +155,14 @@ def main():
                     st.markdown(get_info_icon_html(used_model), unsafe_allow_html=True)
                     st.markdown(full_response)
                     
+                    new_idx = len(st.session_state.messages) - 1
+                    
                     if show_sources and sources_list:
-                        with st.expander("📄 Fonti consultate"):
+                        with st.expander("📄 Fonti consultate", expanded=False, key=f"source_{new_idx}"):
                             for src in sources_list:
                                 st.caption(f"• {src}")
+                                
+                    st.components.v1.html(get_auto_scroll_js(new_idx), height=0)
 
             except Exception as e:
                 error_msg = str(e).lower()

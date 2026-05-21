@@ -206,3 +206,25 @@ def get_info_icon_html(model_name: str) -> str:
         <span class="tooltip-text">Generato con: <b style="color: #38bdf8;">{model_name}</b></span>
     </div>
     """
+
+def get_auto_scroll_js(msg_idx: int) -> str:
+    """Genera lo script JS per lo scroll fluido, eseguito TASSATIVAMENTE una sola volta per messaggio."""
+    return f"""
+    <script>
+        // Eseguiamo lo scroll solo se non è già stato fatto per questo specifico messaggio
+        if (!window.parent.window['scrolled_for_msg_{msg_idx}']) {{
+            window.parent.window['scrolled_for_msg_{msg_idx}'] = true;
+            
+            setTimeout(function() {{
+                var scrollContainer = window.parent.document.querySelector('.main') || window.parent.document.querySelector('[data-testid="stAppViewContainer"]');
+                if (scrollContainer) {{
+                    var distanceFromBottom = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight;
+                    
+                    if (distanceFromBottom < 500) {{
+                        scrollContainer.scrollTo({{top: scrollContainer.scrollHeight, behavior: 'smooth'}});
+                    }}
+                }}
+            }}, 150);
+        }}
+    </script>
+    """
