@@ -17,6 +17,7 @@ def build_graph():
     workflow.add_node("domain_guard", domain_guard_node)
     workflow.add_node("retrieve", retrieve_node)
     workflow.add_node("generate", generate_node)
+    workflow.add_node("web_search", web_search_node) # <-- Nuovo Nodo
 
     workflow.add_edge(START, "condense_question")
     workflow.add_edge("condense_question", "domain_guard")
@@ -28,7 +29,15 @@ def build_graph():
     
     workflow.add_edge("retrieve", "generate")
     
-    workflow.add_edge("generate", END)
+    workflow.add_conditional_edges(
+        "generate", route_after_generation,
+        {
+            "go_to_web": "web_search",
+            "go_to_end": END
+        }
+    )
+    
+    workflow.add_edge("web_search", END)
 
     return workflow.compile()
 
