@@ -17,7 +17,7 @@ def build_graph():
     workflow.add_node("domain_guard", domain_guard_node)
     workflow.add_node("retrieve", retrieve_node)
     workflow.add_node("generate", generate_node)
-    workflow.add_node("web_search", web_search_node) # <-- Nuovo Nodo
+    workflow.add_node("web_search", web_search_node)
 
     workflow.add_edge(START, "condense_question")
     workflow.add_edge("condense_question", "domain_guard")
@@ -153,19 +153,12 @@ def main():
                                     
                             elif node_name == "retrieve":
                                 docs_count = len(final_state.get("sources", []))
-                                st.write(f"✔️ Recuperati {docs_count} documenti rilevanti")
+                                st.write(f"✔️ Recuperati {docs_count} documenti")
                                 status.update(label="🧠 Generazione della risposta...")
                                 
                             elif node_name == "generate":
-                                generation = final_state.get("generation", "").lower()
-                                fallback_phrases = [
-                                    "[trigger_web_search]", "non sono disponibili", "non trovo", 
-                                    "non ho informazioni", "mi dispiace", "non è presente", 
-                                    "non sono in grado", "non menziona", "nessuna informazione", 
-                                    "non ci sono informazioni"
-                                ]
-                                
-                                if any(phrase in generation for phrase in fallback_phrases):
+                                generation = final_state.get("generation", "")
+                                if "[TRIGGER_WEB_SEARCH]" in generation:
                                     st.write("⚠️ Informazioni non trovate nel database locale")
                                     status.update(label="🌐 Ricerca sul Web in corso...")
                                 else:
@@ -187,7 +180,6 @@ def main():
                     "model_used": used_model
                 })
                 
-                # Logica di renderizzazione UI
                 if used_model != st.session_state.current_model:
                     st.session_state.pending_toast = f"Fallback attivato! Passaggio da {st.session_state.current_model} a {used_model}"
                     st.session_state.current_model = used_model
