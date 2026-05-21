@@ -85,7 +85,7 @@ def domain_guard_node(state: RAGState):
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", DOMAIN_PROMPT),
-        ("human", f"Domanda utente: {question}")
+        ("human", "Domanda utente: {question}")
     ])
     chain = prompt | load_llm(state.get("current_model")) | StrOutputParser()
 
