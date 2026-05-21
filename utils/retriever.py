@@ -21,8 +21,8 @@ os.environ["HF_TOKEN"] = "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"
 
 VS_DIR = "knowledge/vectorstores"
 
-K_WEB = 10
-K_PDF = 5
+K_WEB = 20
+K_PDF = 10
 
 TOP_N = 5
 

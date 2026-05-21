@@ -1,8 +1,9 @@
 import os
 import streamlit as st
-from utils.style import get_info_icon_html, get_global_css, get_welcome_screen_html, get_header_html
+from utils.nodes import *
+from utils.retriever import HybridRetriever
+from utils.style import *
 from utils.utils import sample_questions
-from utils.nodes import build_graph
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -68,7 +69,7 @@ def main():
     if not st.session_state.messages:
         st.markdown(get_welcome_screen_html(), unsafe_allow_html=True)
     else:
-        for msg in st.session_state.messages:
+        for idx, msg in enumerate(st.session_state.messages):
             with st.chat_message(msg["role"]):
                 if msg["role"] == "assistant":
                     model_name = msg.get("model_used", "Sconosciuto")
@@ -77,56 +78,85 @@ def main():
                 st.markdown(msg["content"])
                 
                 if msg["role"] == "assistant" and show_sources and msg.get("sources"):
-                    with st.expander("📄 Fonti consultate"):
+                    with st.expander("📄 Fonti consultate", expanded=False, key=f"source_{idx}"):
                         for src in msg["sources"]:
                             st.caption(f"• {src}")
 
     if should_generate:
         with st.chat_message("assistant"):
-            with st.spinner("DIEMbot sta elaborando la richiesta..."):
-                initial_state = {
-                    "question": user_input, 
-                    "chat_history": st.session_state.messages[:-1], 
-                    "retry_count": 0,
-                    "current_model": st.session_state.current_model
-                }
-                
-                try:
-                    final_state = rag_app.invoke(initial_state)
-                    
-                    full_response = final_state["generation"]
-                    sources_list = final_state.get("sources", [])
-                    used_model = final_state.get("model_used", st.session_state.current_model)
-                    
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": full_response,
-                        "sources": sources_list,
-                        "model_used": used_model
-                    })
-                    
-                    if used_model != st.session_state.current_model:
-                        st.session_state.pending_toast = f"Fallback attivato! Passaggio da {st.session_state.current_model} a {used_model}"
-                        st.session_state.current_model = used_model
-                        st.rerun()
-                    else:
-                        st.markdown(get_info_icon_html(used_model), unsafe_allow_html=True)
-                        st.markdown(full_response)
-                        
-                        if show_sources and sources_list:
-                            with st.expander("📄 Fonti consultate"):
-                                for src in sources_list:
-                                    st.caption(f"• {src}")
+            initial_state = {
+                "question": user_input,
+                "chat_history": st.session_state.messages[:-1],
+                "retry_count": 0,
+                "current_model": st.session_state.current_model
+            }
 
-                except Exception as e:
-                    error_msg = str(e).lower()
-                    if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
-                        st.warning("⏳ **Troppe richieste!** Il Dipartimento sta facendo molte domande a DIEMbot. Per favore, attendi circa un minuto e riprova.")
-                    else:
-                        st.error("❌ Ops, si è verificato un errore di connessione con il modello AI. Riprova tra un attimo.")
-                    
-                    st.session_state.messages.pop()
-                    st.rerun()
+            final_state = initial_state.copy()
+            generation_error = None
+
+            try:
+                with st.status("✍️ Analisi della domanda...", expanded=True) as status:
+                    for event in rag_app.stream(initial_state):
+                        for node_name, node_state in event.items():
+                            final_state.update(node_state)
+
+                            if node_name == "condense_question":
+                                st.write("✔️ Domanda contestualizzata")
+                                status.update(label="🛡️ Verifica del dominio in corso...")
+
+                            elif node_name == "domain_guard":
+                                if final_state.get("is_in_domain") == "no":
+                                    st.write("🛑 Domanda fuori dominio")
+                                    status.update(label="Elaborazione completata", state="complete", expanded=False)
+                                else:
+                                    st.write("✔️ Dominio confermato")
+                                    status.update(label="🔍 Recupero informazioni dal database...")
+
+                            elif node_name == "retrieve":
+                                docs_count = len(final_state.get("sources", []))
+                                st.write(f"✔️ Recuperati {docs_count} documenti")
+                                status.update(label="🧠 Generazione della risposta...")
+
+                            elif node_name == "generate":
+                                generation = final_state.get("generation", "")
+                                if "[TRIGGER_WEB_SEARCH]" in generation:
+                                    st.write("⚠️ Informazioni non trovate nel database locale")
+                                    status.update(label="🌐 Ricerca sul Web in corso...")
+                                else:
+                                    st.write("✔️ Risposta generata dal database")
+                                    status.update(label="Elaborazione completata", state="complete", expanded=False)
+
+                            elif node_name == "web_search":
+                                st.write("✔️ Risposta generata dalle fonti web")
+                                status.update(label="Elaborazione completata", state="complete", expanded=False)
+
+            except Exception as e:
+                generation_error = e
+
+        if generation_error is not None:
+            error_msg = str(generation_error).lower()
+            if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
+                st.warning("⏳ **Troppe richieste!** Il Dipartimento sta facendo molte domande a DIEMbot. Per favore, attendi circa un minuto e riprova.")
+            else:
+                st.error("❌ Ops, si è verificato un errore di connessione con il modello AI. Riprova tra un attimo.")
+            st.session_state.messages.pop()
+        else:
+            full_response = final_state.get("generation", "")
+            sources_list  = final_state.get("sources", [])
+            used_model    = final_state.get("model_used", st.session_state.current_model)
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": full_response,
+                "sources": sources_list,
+                "model_used": used_model
+            })
+
+            if used_model != st.session_state.current_model:
+                st.session_state.pending_toast = f"Fallback attivato! Passaggio da {st.session_state.current_model} a {used_model}"
+                st.session_state.current_model = used_model
+
+        st.rerun()
 
 if __name__ == "__main__":
     main()
