@@ -90,26 +90,25 @@ def main():
     if should_generate:
         with st.chat_message("assistant"):
             initial_state = {
-                "question": user_input, 
-                "chat_history": st.session_state.messages[:-1], 
+                "question": user_input,
+                "chat_history": st.session_state.messages[:-1],
                 "retry_count": 0,
                 "current_model": st.session_state.current_model
             }
-            
+
+            final_state = initial_state.copy()
+            generation_error = None
+
             try:
-                final_state = initial_state.copy()
-                
                 with st.status("✍️ Analisi della domanda...", expanded=True) as status:
-                    
                     for event in rag_app.stream(initial_state):
                         for node_name, node_state in event.items():
-                            
                             final_state.update(node_state)
-                            
+
                             if node_name == "condense_question":
                                 st.write("✔️ Domanda contestualizzata")
                                 status.update(label="🛡️ Verifica del dominio in corso...")
-                                
+
                             elif node_name == "domain_guard":
                                 if final_state.get("is_in_domain") == "no":
                                     st.write("🛑 Domanda fuori dominio")
@@ -117,12 +116,12 @@ def main():
                                 else:
                                     st.write("✔️ Dominio confermato")
                                     status.update(label="🔍 Recupero informazioni dal database...")
-                                    
+
                             elif node_name == "retrieve":
                                 docs_count = len(final_state.get("sources", []))
                                 st.write(f"✔️ Recuperati {docs_count} documenti")
                                 status.update(label="🧠 Generazione della risposta...")
-                                
+
                             elif node_name == "generate":
                                 generation = final_state.get("generation", "")
                                 if "[TRIGGER_WEB_SEARCH]" in generation:
@@ -131,48 +130,38 @@ def main():
                                 else:
                                     st.write("✔️ Risposta generata dal database")
                                     status.update(label="Elaborazione completata", state="complete", expanded=False)
-                                    
+
                             elif node_name == "web_search":
                                 st.write("✔️ Risposta generata dalle fonti web")
                                 status.update(label="Elaborazione completata", state="complete", expanded=False)
 
-                full_response = final_state.get("generation", "")
-                sources_list = final_state.get("sources", [])
-                used_model = final_state.get("model_used", st.session_state.current_model)
-                
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": full_response,
-                    "sources": sources_list,
-                    "model_used": used_model
-                })
-                
-                if used_model != st.session_state.current_model:
-                    st.session_state.pending_toast = f"Fallback attivato! Passaggio da {st.session_state.current_model} a {used_model}"
-                    st.session_state.current_model = used_model
-                    st.rerun()
-                else:
-                    st.markdown(get_info_icon_html(used_model), unsafe_allow_html=True)
-                    st.markdown(full_response)
-                    
-                    new_idx = len(st.session_state.messages) - 1
-                    
-                    if show_sources and sources_list:
-                        with st.expander("📄 Fonti consultate", expanded=False, key=f"source_{new_idx}"):
-                            for src in sources_list:
-                                st.caption(f"• {src}")
-                                
-                    st.components.v1.html(get_auto_scroll_js(new_idx), height=0)
-
             except Exception as e:
-                error_msg = str(e).lower()
-                if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
-                    st.warning("⏳ **Troppe richieste!** Il Dipartimento sta facendo molte domande a DIEMbot. Per favore, attendi circa un minuto e riprova.")
-                else:
-                    st.error("❌ Ops, si è verificato un errore di connessione con il modello AI. Riprova tra un attimo.")
-                
-                st.session_state.messages.pop()
-                st.rerun()
+                generation_error = e
+
+        if generation_error is not None:
+            error_msg = str(generation_error).lower()
+            if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
+                st.warning("⏳ **Troppe richieste!** Il Dipartimento sta facendo molte domande a DIEMbot. Per favore, attendi circa un minuto e riprova.")
+            else:
+                st.error("❌ Ops, si è verificato un errore di connessione con il modello AI. Riprova tra un attimo.")
+            st.session_state.messages.pop()
+        else:
+            full_response = final_state.get("generation", "")
+            sources_list  = final_state.get("sources", [])
+            used_model    = final_state.get("model_used", st.session_state.current_model)
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": full_response,
+                "sources": sources_list,
+                "model_used": used_model
+            })
+
+            if used_model != st.session_state.current_model:
+                st.session_state.pending_toast = f"Fallback attivato! Passaggio da {st.session_state.current_model} a {used_model}"
+                st.session_state.current_model = used_model
+
+        st.rerun()
 
 if __name__ == "__main__":
     main()
