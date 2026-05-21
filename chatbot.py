@@ -1,36 +1,11 @@
 import os
 import streamlit as st
-from langgraph.graph import StateGraph, START, END
-from utils.config import RAGState
-from utils.nodes import *
-from utils.retriever import HybridRetriever
 from utils.style import get_info_icon_html, get_global_css, get_welcome_screen_html, get_header_html
 from utils.utils import sample_questions
+from utils.nodes import build_graph
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["OMP_NUM_THREADS"] = "1"
-
-def build_graph():
-    workflow = StateGraph(RAGState)
-
-    workflow.add_node("condense_question", condense_question_node)
-    workflow.add_node("domain_guard", domain_guard_node)
-    workflow.add_node("retrieve", retrieve_node)
-    workflow.add_node("generate", generate_node)
-
-    workflow.add_edge(START, "condense_question")
-    workflow.add_edge("condense_question", "domain_guard")
-
-    workflow.add_conditional_edges(
-        "domain_guard", route_after_domain,
-        {"in_domain": "retrieve", "out_of_domain": END}
-    )
-    
-    workflow.add_edge("retrieve", "generate")
-    
-    workflow.add_edge("generate", END)
-
-    return workflow.compile()
 
 def main():
     st.set_page_config(page_title="DIEMbot", page_icon="🎓", layout="centered")
@@ -45,11 +20,6 @@ def main():
         st.toast(st.session_state.pending_toast, icon="🔄")
         del st.session_state.pending_toast
 
-    if "retriever" not in st.session_state:
-        with st.spinner("Caricamento del database della conoscenza..."):
-            st.session_state.retriever = HybridRetriever()
-            st.success("Database caricato con successo!")
-
     rag_app = build_graph()
 
     if "messages" not in st.session_state:
@@ -57,7 +27,7 @@ def main():
     
     with st.sidebar:
         st.header("Impostazioni")
-        model_options = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash", OLLAMA_MODEL]
+        model_options = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash", "mistral-nemo", "llama3.1"]
         current_idx = model_options.index(st.session_state.current_model) if st.session_state.current_model in model_options else 0
         
         selected_model = st.selectbox(
