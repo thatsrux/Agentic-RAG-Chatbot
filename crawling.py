@@ -27,6 +27,7 @@ os.makedirs(PAGES_DIR, exist_ok=True)
 os.makedirs(PDF_MD_DIR, exist_ok=True)
 
 KEYWORDS = ["DIEM", "DIPARTIMENTO DI INGEGNERIA DELL'INFORMAZIONE", "INGEGNERIA INFORMATICA"]
+
 CORSI_DIEM_URLS = [
     "https://corsi.unisa.it/ingegneria-dell-informazione-per-la-medicina-digitale",
     "https://corsi.unisa.it/ingegneria-informatica",
@@ -53,9 +54,6 @@ EASYROOM = [
     "https://easycourse.unisa.it/EasyRoom/index.php?vista=week&content=view_prenotazioni&area=37&_lang=it&room=18",
     "https://easycourse.unisa.it/EasyRoom/index.php?vista=week&content=view_prenotazioni&area=36&_lang=it&room=15"
 ]
-
-
-
 
 def load_state():
     if os.path.exists(STATE_FILE):

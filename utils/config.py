@@ -1,5 +1,7 @@
+from datetime import datetime
 from typing import TypedDict, List
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
+
 
 import torch
 device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
@@ -8,6 +10,8 @@ device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is
 OLLAMA_MODEL = "mistral-nemo"
 
 MAX_RETRIES = 2
+
+CURRENT_DATE = datetime.now().strftime("%d/%m/%Y")
 
 class RAGState(TypedDict):
     question: str
@@ -22,7 +26,7 @@ class RAGState(TypedDict):
     model_used: str
     current_model: str
 
-SYSTEM_PROMPT = """
+SYSTEM_PROMPT = f"""
 Sei DIEMbot, l'assistente virtuale del DIEM (Dipartimento di Ingegneria dell'Informazione ed Elettrica e Matematica applicata) dell'Università di Salerno.
 
 REGOLE FONDAMENTALI:
@@ -31,6 +35,9 @@ REGOLE FONDAMENTALI:
 3. Se l'informazione per rispondere alla domanda NON è completamente presente nel Contesto, è SEVERAMENTE VIETATO formulare frasi di cortesia, scusarsi o dire "non lo so". Devi restituire UNICAMENTE e TASSATIVAMENTE questa esatta stringa: [TRIGGER_WEB_SEARCH]
 4. NON usare mai espressioni come "In base al documento X" o "Il documento Y dice". Rispondi in modo diretto, discorsivo e fluido, assumendo le informazioni come tue conoscenze dirette.
 5. Se noti che le informazioni nel contesto sono elenchi di dati, commissioni, orari o contatti, ricostruiscili se possibile mostrandoli all'utente sotto forma di tabella Markdown pulita e ben impaginata.
+6. Quando l'utente usa riferimenti temporali ("ieri", "domani", "anno scorso", "questo semestre"), 
+   usa la data di oggi ({CURRENT_DATE}) per calcolare correttamente il riferimento temporale corretto 
+   basandoti sui dati presenti nei documenti.
 """
 
 RAG_PROMPT = ChatPromptTemplate.from_messages([
@@ -48,7 +55,7 @@ REGOLE:
 
 Rispondi ESCLUSIVAMENTE si o no"""
 
-CONDENSE_PROMPT = """Sei un risolutore di coreferenze e ottimizzatore di query.
+CONDENSE_PROMPT = f"""Sei un risolutore di coreferenze e ottimizzatore di query.
 L'utente sta parlando con l'assistente del DIEM. Il database contiene SOLO documenti del DIEM.
 
 REGOLE TASSATIVE:
@@ -57,11 +64,13 @@ REGOLE TASSATIVE:
 3. NESSUN CONTESTO OVVIO: Non aggiungere MAI frasi come "al DIEM", "del dipartimento", "all'Università di Salerno". Sporcano la ricerca.
 4. COPIA-INCOLLA: Se la domanda è già autonoma e non ha riferimenti ambigui, copiala TESTUALMENTE senza alterare nulla.
 5. Restituisci ESCLUSIVAMENTE la domanda riscritta, senza alcun altro testo.
+6. INFERENZA TEMPORALE: Se la domanda contiene riferimenti temporali relativi ("ieri", "settimana scorsa", "l'anno accademico passato"), 
+   trasformali in riferimenti assoluti (date, mesi o anni specifici) usando la data di oggi ({CURRENT_DATE}) come base.
 
 Cronologia della conversazione:
-{history}
+{{history}}
 
-Ultima domanda: {query}
+Ultima domanda: {{query}}
 
 Query riscritta:"""
 
@@ -78,3 +87,25 @@ Contesto Web:
 
 Domanda: {question}
 """
+
+keyword_prompt = PromptTemplate.from_template(
+        """Sei un motore di routing avanzato per le ricerche del dipartimento DIEM dell'Università di Salerno.
+        Devi analizzare la domanda e decidere la query migliore e il SITO SPECIFICO in cui cercare.
+        
+        REGOLE TASSATIVE:
+        1. Aggiungi SEMPRE la parola "DIEM" oppure il nome del corso di laurea (es. "Ingegneria Informatica") alla query.
+        2. Se cerchi un ORARIO (easycourse), aggiungi SEMPRE "Ingegneria Informatica".
+        3. Se cerchi un'AULA o l'UBICAZIONE di un laboratorio, usa SEMPRE le parole "strutture didattiche".
+        
+        DOMINI A DISPOSIZIONE:
+        - "diem.unisa.it" : per organi, responsabili, avvisi, bandi.
+        - "corsi.unisa.it" : per aule, strutture didattiche, programmi.
+        - "docenti.unisa.it" : SOLO per nome e cognome di un professore.
+        - "easycourse.unisa.it" : per orari delle lezioni.
+        
+        Rispondi ESCLUSIVAMENTE con un JSON valido con questo formato:
+        {{"query": "parole chiave pulite", "site": "dominio scelto"}}
+        
+        Domanda: {question}
+        JSON:"""
+    )
