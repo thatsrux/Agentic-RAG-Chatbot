@@ -187,8 +187,9 @@ class HybridRetriever:
                 "test",
                 k=100000
             )
+
             docs.extend(web_docs)
-            
+
             self.bm25_docs = docs
 
             tokenized = [
@@ -229,22 +230,40 @@ class HybridRetriever:
         return output
 
     # =====================================================
-    # RETRIEVAL METHODS
+    # WEB RETRIEVAL
     # =====================================================
 
     def _retrieve_web(self, query):
+
         try:
+
             return self.web_retriever.invoke(query)
+
         except Exception as e:
+
             print(f"[WEB] Retrieval failed: {e}")
+
             return []
 
+    # =====================================================
+    # PDF RETRIEVAL
+    # =====================================================
+
     def _retrieve_pdf(self, query):
+
         try:
+
             return self.pdf_retriever.invoke(query)
+
         except Exception as e:
+
             print(f"[PDF] Retrieval failed: {e}")
+
             return []
+
+    # =====================================================
+    # BM25 RETRIEVAL
+    # =====================================================
 
     def _retrieve_bm25(self, query):
 
@@ -263,7 +282,6 @@ class HybridRetriever:
                 reverse=True
             )
 
-            # Raccoglie i top documenti dal BM25
             return [
                 doc
                 for doc, score in ranked[:K_WEB]
@@ -294,7 +312,7 @@ class HybridRetriever:
             futures = {}
 
             # WEB
-            if route in ["web", "both", "all"]:
+            if route in ["web", "both"]:
 
                 futures["web"] = executor.submit(
                     self._retrieve_web,
@@ -302,7 +320,7 @@ class HybridRetriever:
                 )
 
             # PDF
-            if route in ["pdf", "both", "all"]:
+            if route in ["pdf", "both"]:
 
                 futures["pdf"] = executor.submit(
                     self._retrieve_pdf,

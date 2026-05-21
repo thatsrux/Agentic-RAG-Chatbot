@@ -43,7 +43,9 @@ def main():
     with open(KB_FILE, "rb") as f:
         all_docs = pickle.load(f)
 
-    web_docs, pdf_docs = [], []
+    web_docs = []
+    pdf_docs = []
+
     for d in all_docs:
         if d.metadata.get("type") == "web":
             if len(d.page_content.strip()) > 100:
@@ -95,7 +97,18 @@ def main():
         pdf_retriever.add_documents(pdf_docs[i : i + batch_size])
     pdf_retriever.vectorstore.save_local(faiss_pdf_path)
 
-    print("\n[FINISH] Tutte le indicizzazioni FAISS (Web e PDF) completate con successo!")
+    batch_size_pdf = 5
+    total_pdf_batches = (len(pdf_docs) + batch_size_pdf - 1) // batch_size_pdf
+    print(f"  [PDF] Trovati {len(pdf_docs)} documenti originali. Suddivisi in {total_pdf_batches} blocchi.")
+
+    for i in range(0, len(pdf_docs), batch_size_pdf):
+        batch = pdf_docs[i : i + batch_size_pdf]
+        current_batch = (i // batch_size_pdf) + 1
+        print(f"  [PDF] Elaborazione batch {current_batch}/{total_pdf_batches}...")
+        pdf_retriever.add_documents(batch)
+
+    child_vs.save_local(faiss_pdf_path)
+    print("\n[FINISH] Indicizzazione FAISS completata con successo.")
 
 if __name__ == "__main__":
     main()

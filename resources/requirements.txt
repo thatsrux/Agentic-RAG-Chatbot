@@ -30,6 +30,5 @@ crawl4ai>=0.8.0
 beautifulsoup4>=4.12.0
 pypdf>=4.0.0
 requests>=2.32.0
-
-html5lib
-lxml
+openpyxl
+xlrd
