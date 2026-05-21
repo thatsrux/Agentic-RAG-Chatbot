@@ -464,7 +464,7 @@ async def crawl_task(task, crawler, state, doc_dict):
 async def main():
     state, doc_dict = load_state(), load_knowledge_base()
     SEARCH_TASKS = [
-        {"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 4, "filter": False},
+        {"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 3, "filter": False},
         {"name": "Docenti", "urls": ["https://docenti.unisa.it/"], "depth": 3, "filter": True},
         {"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 3, "filter": False},
         {"name": "EasyCourse Orari", "urls": EASYCOURSE, "depth": 2, "filter": False},
