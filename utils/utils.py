@@ -43,6 +43,7 @@ def load_llm(selected_model: str = "gemini-3.1-flash-lite"):
     llama = ChatOllama(
         model = "llama3.1",
         temperature=0.1,
+        num_ctx=8192 
     )
         
     if selected_model == "gemini-3.1-flash-lite":
