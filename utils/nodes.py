@@ -6,7 +6,7 @@ from utils.utils import load_llm, format_context
 
 RESET   = "\033[0m"
 BOLD    = "\033[1m"
-CYAN    = "\033[96m"    # CONDENSE
+CYAN    = "\033[96m"   # CONDENSE
 YELLOW  = "\033[93m"   # DOMAIN_GUARD
 GREEN   = "\033[92m"   # RETRIEVE
 BLUE    = "\033[94m"   # DOC_GRADE
@@ -30,18 +30,6 @@ def _safe_extract_string(output) -> str:
             return str(output[0])
         return ""
     return str(output)
-
-# --- FIX GEMINI: Funzione di estrazione sicura ---
-def _safe_extract_string(output) -> str:
-    """Previene l'errore 'list object has no attribute strip'."""
-    if isinstance(output, list):
-        if len(output) > 0:
-            if isinstance(output[0], dict):
-                return str(output[0].get("text", ""))
-            return str(output[0])
-        return ""
-    return str(output)
-# -------------------------------------------------
 
 def condense_question_node(state: RAGState):
     question = state["question"]
@@ -85,7 +73,7 @@ def domain_guard_node(state: RAGState):
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", DOMAIN_PROMPT),
-        ("human", "Domanda utente: {question}")
+        ("human", f"Domanda utente: {question}")
     ])
     chain = prompt | load_llm(state.get("current_model")) | StrOutputParser()
 
