@@ -7,7 +7,6 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from utils.config import *
 from utils.utils import load_llm, format_context
-from utils.config import keyword_prompt
 from crawling import KEYWORDS, CORSI_DIEM_URLS
 from langgraph.graph import StateGraph, START, END
 from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
@@ -101,13 +100,13 @@ def domain_guard_node(state: RAGState):
         }
     return {"is_in_domain": "si"}
 
-
+retriever = HybridRetriever()
 def retrieve_node(state: RAGState):
     question = state["question"]
     _sep(GREEN, "RETRIEVE")
     _log(GREEN, "RETRIEVE", f"INPUT  question   : {question}")
     
-    docs = st.session_state.retriever.retrieve(question)
+    docs = retriever.retrieve(question)
     _log(GREEN, "RETRIEVE", f"OUTPUT docs count : {len(docs)}")
     
     context = format_context(docs)
@@ -277,7 +276,7 @@ def build_graph():
     )
     
     workflow.add_edge("retrieve", "generate")
-    
+
     workflow.add_conditional_edges(
         "generate", route_after_generation,
         {

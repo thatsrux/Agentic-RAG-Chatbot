@@ -21,11 +21,6 @@ def main():
         st.toast(st.session_state.pending_toast, icon="🔄")
         del st.session_state.pending_toast
 
-    if "retriever" not in st.session_state:
-        with st.spinner("Caricamento del database della conoscenza..."):
-            st.session_state.retriever = HybridRetriever()
-            st.success("Database caricato con successo!")
-
     rag_app = build_graph()
 
     if "messages" not in st.session_state:
@@ -33,7 +28,7 @@ def main():
     
     with st.sidebar:
         st.header("Impostazioni")
-        model_options = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash", OLLAMA_MODEL]
+        model_options = ["gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash", "mistral-nemo", "llama3.1"]
         current_idx = model_options.index(st.session_state.current_model) if st.session_state.current_model in model_options else 0
         
         selected_model = st.selectbox(
