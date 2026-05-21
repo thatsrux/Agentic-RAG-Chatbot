@@ -38,9 +38,9 @@ def condense_question_node(state: RAGState):
     _sep(CYAN, "CONDENSE QUESTION")
     _log(CYAN, "CONDENSE", f"INPUT  question : {question}")
 
-    if not history_list:
-        _log(CYAN, "CONDENSE", "Nessuna history → skip LLM")
-        return {"question": question}
+    # if not history_list:
+    #     _log(CYAN, "CONDENSE", "Nessuna history → skip LLM")
+    #     return {"question": question}
 
     recent_history = history_list[-4:] if len(history_list) > 4 else history_list
     chat_history_str = ""
