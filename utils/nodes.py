@@ -7,6 +7,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from utils.config import *
 from utils.utils import load_llm, format_context
+from utils.retriever import HybridRetriever
 from crawling import KEYWORDS, CORSI_DIEM_URLS
 from langgraph.graph import StateGraph, START, END
 from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
