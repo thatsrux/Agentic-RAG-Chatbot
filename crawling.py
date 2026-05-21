@@ -7,6 +7,7 @@ import re
 import hashlib
 import json
 import io
+from datetime import datetime, timedelta
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from pypdf import PdfReader
@@ -31,14 +32,30 @@ CORSI_DIEM_URLS = [
     "https://corsi.unisa.it/ingegneria-informatica",
     "https://corsi.unisa.it/electrical-engineering-for-digital-energy",
     "https://corsi.unisa.it/information-Engineering-for-digital-medicine",
-    "https://corsi.unisa.it/0650107303300001",                              
-    "https://corsi.unisa.it/DOT18CK8F9",                                    
+    "https://corsi.unisa.it/0650107303300001",
+    "https://corsi.unisa.it/DOT18CK8F9",
     "https://corsi.unisa.it/photovoltaics"
 ]
 CORSI_ALIASES = {
     "https://corsi.unisa.it/0650107303300001": "https://corsi.unisa.it/ingegneria-informatica-magistrale",
     "https://corsi.unisa.it/DOT18CK8F9": "https://corsi.unisa.it/ingegneria-dell-informazione"
 }
+EASYCOURSE= [
+    "https://easycourse.unisa.it/EasyCourse//Orario/Dipartimento_di_Ingegneria_dellInformazione_ed_Elettrica_e_Matematica_Applicata/2025-2026/index.html",
+    "https://easycourse.unisa.it/EasyCourse//Orario/Dipartimento_di_Ingegneria_dellInformazione_ed_Elettrica_e_Matematica_Applicata/2024-2025/index.html",
+    "https://easycourse.unisa.it/EasyCourse//Orario/Dipartimento_di_Ingegneria_dellInformazione_ed_Elettrica_e_Matematica_Applicata/2023-2024/index.html",
+    "https://easycourse.unisa.it/EasyCourse//Orario/Dipartimento_di_Ingegneria_dellInformazione_ed_Elettrica_e_Matematica_Applicata/2022-2023/index.html",
+    "https://easycourse.unisa.it/EasyCourse//Orario/Dipartimento_di_Ingegneria_dellInformazione_ed_Elettrica_e_Matematica_Applicata/2021-2022/index.html"
+]
+
+EASYROOM = [
+    "https://easycourse.unisa.it/EasyRoom/index.php?vista=week&content=view_prenotazioni&area=2&_lang=it&room=6",
+    "https://easycourse.unisa.it/EasyRoom/index.php?vista=week&content=view_prenotazioni&area=37&_lang=it&room=18",
+    "https://easycourse.unisa.it/EasyRoom/index.php?vista=week&content=view_prenotazioni&area=36&_lang=it&room=15"
+]
+    
+
+
 
 def load_state():
     if os.path.exists(STATE_FILE):
@@ -102,25 +119,301 @@ def parse_unisa_calendar_to_sentences(html_content):
                 frasi.append(f"In {titolo_calendario}, per il giorno {data_corrente}, la fascia oraria {orario} prevede: {dettaglio}.")
     return "\n".join(frasi) if frasi else ""
 
-def extract_links_and_pdfs(html, current_url, start_url):
-    soup, links_to_visit, pdfs_to_download = BeautifulSoup(html, "html.parser"), [], []
-    base_boundary = start_url.lower().rstrip('/')
-    valid_boundaries = [base_boundary] + [alias.lower() for k, alias in CORSI_ALIASES.items() if base_boundary in (k.lower(), alias.lower())] + [k.lower() for k, alias in CORSI_ALIASES.items() if base_boundary in (k.lower(), alias.lower())]
-    allowed_domain = urlparse(start_url).netloc
+def parse_easyroom_table(html_content):
+    soup = BeautifulSoup(html_content, "html.parser")
+    frasi = []
 
-    for a in soup.find_all('a', href=True):
-        href = a['href']
-        if not href or href.startswith(('javascript:', 'mailto:', 'tel:')): continue
-        if not href.startswith(('http', '/', '#')): href = '/' + href
+    # 1. Trova il nome dell'aula in modo sicuro e definitivo
+    nome_aula = "Aula Sconosciuta"
+    
+    # STRATEGIA A: Estrazione dall'opzione selezionata nel menu delle aule
+    # (Escludiamo il select con id="function_options")
+    select_aula = soup.find("select", attrs={"name": "url", "id": lambda x: x != "function_options"})
+    if select_aula:
+        option_selected = select_aula.find("option", selected=True)
+        if option_selected:
+            text_opzione = option_selected.get_text(strip=True)
+            # Pulisce "Aula 133 (40 posti - ...)" lasciando solo "Aula 133"
+            nome_aula = text_opzione.split("(")[0].strip()
+
+    # STRATEGIA B: Di riserva, se la precedente fallisce, cerca l'intestazione esatta della tabella
+    if nome_aula == "Aula Sconosciuta":
+        for td in soup.find_all("td"):
+            # Usiamo il confronto ESATTO per evitare il match con "Cambia aula:"
+            if td.get_text(strip=True) == "Aula:":
+                sibling = td.find_next_sibling("td")
+                if sibling:
+                    raw_text = sibling.get_text(separator=" ", strip=True)
+                    nome_aula = raw_text.split("Dettagli aula")[0].strip()
+                    break
+
+    # 2. Individua la griglia del calendario
+    timegrid = soup.find("table", class_="timegrid")
+    if not timegrid: 
+        return ""
+
+    # 3. Estrai le intestazioni dei giorni (colonne 1-7)
+    giorni = {}
+    thead = timegrid.find("thead")
+    if thead:
+        headers = thead.find("tr").find_all("td", recursive=False)
+        for i, th in enumerate(headers):
+            if 0 < i < len(headers) - 1: 
+                giorni[i] = th.get_text(separator=" ", strip=True)
+
+    # 4. Leggi la griglia tenendo traccia dei rowspan
+    tbody = timegrid.find("tbody")
+    if not tbody: 
+        return ""
+
+    active_rowspans = {}  
+    rows = tbody.find_all("tr", recursive=False)
+
+    for row in rows:
+        col_idx = 0
+        tds = row.find_all("td", recursive=False)
+        td_iter = iter(tds)
+
+        while col_idx <= 7:  
+            if active_rowspans.get(col_idx, 0) > 0:
+                active_rowspans[col_idx] -= 1
+                col_idx += 1
+                continue
+
+            try:
+                td = next(td_iter)
+            except StopIteration:
+                break
+
+            if col_idx == 0:
+                current_time = td.get_text(strip=True)
+            elif 1 <= col_idx <= 7:
+                entry = td.find("table", class_="entry")
+                if entry:
+                    materia_td = entry.find(lambda tag: tag.name == "td" and "font-weight:bold" in tag.get("style", ""))
+                    prof_td = entry.find(lambda tag: tag.name == "td" and "#990000" in tag.get("style", ""))
+                    tipo_span = entry.find(lambda tag: tag.name == "span" and "entry_type_name" in tag.get("id", ""))
+
+                    materia = materia_td.get_text(strip=True) if materia_td else "Materia Sconosciuta"
+                    prof = prof_td.get_text(strip=True) if prof_td else "Docente Sconosciuto"
+                    tipo = tipo_span.get_text(strip=True) if tipo_span else "Evento"
+
+                    rowspan = int(td.get("rowspan", 1))
+                    active_rowspans[col_idx] = rowspan - 1
+                    
+                    # Calcolo orario di inizio e fine
+                    start_time = current_time.split("-")[0] if "-" in current_time else current_time
+                    durata_minuti = rowspan * 30
+                    
+                    try:
+                        start_dt = datetime.strptime(start_time, "%H:%M")
+                        end_dt = start_dt + timedelta(minutes=durata_minuti)
+                        end_time = end_dt.strftime("%H:%M")
+                    except ValueError:
+                        end_time = "Fine non definita"
+
+                    giorno_str = giorni.get(col_idx, f"Giorno {col_idx}")
+
+                    frasi.append(f"In {nome_aula}, il giorno {giorno_str}, dalle {start_time} alle {end_time}, è prevista l'attività: {tipo} di {materia} (Docente: {prof}).")
+            
+            col_idx += 1
+
+    return "\n".join(frasi) if frasi else ""
+
+def parse_easycourse_table(html_content):
+    soup = BeautifulSoup(html_content, "html.parser")
+    frasi = set()
+
+    # =======================================================
+    # TIPO 1: Tabella "COMPATTO" (lista insegnamenti - tblchk)
+    # =======================================================
+    tblchk = soup.find("table", class_="tblchk")
+    if tblchk:
+        rows = tblchk.find_all("tr")[1:]  # Salta l'intestazione
+        for row in rows:
+            cols = row.find_all("td", recursive=False)
+            if len(cols) >= 6:
+                insegnamento = cols[1].get_text(separator=" ", strip=True)
+                
+                # Il corso è nascosto dentro il div dei dettagli (il tooltip JS)
+                corso_div = cols[2].find("div", class_="details")
+                corso = corso_div.get_text(separator=" - ", strip=True) if corso_div else "Corso non specificato"
+                
+                docente = cols[4].get_text(separator=" / ", strip=True)
+                
+                # Le singole lezioni sono separate da tag <br> all'interno del <td>
+                lezioni_td = cols[5]
+                lezioni = [line.strip() for line in lezioni_td.stripped_strings if line.strip()]
+                
+                for lezione in lezioni:
+                    frasi.add(f"Per il corso di {insegnamento} ({corso}, Docente: {docente}) è prevista lezione: {lezione}.")
+        
+        return "\n".join(sorted(list(frasi))) if frasi else ""
+
+    # =======================================================
+    # TIPO 2: Tabella GRIGLIA "DOCENTE/CURRICULA" (timegrid)
+    # =======================================================
+    timegrid = soup.find("table", class_="timegrid")
+    if timegrid:
+        # Invece di mappare la griglia (soggetta a bug), estraiamo i dati dai popup "details" nascosti!
+        details_divs = soup.find_all("div", class_="details")
+        for detail in details_divs:
+            text_blocks = detail.find_all("div", recursive=False)
+            
+            ins, doc, percorsi = "Sconosciuto", "Sconosciuto", "Percorso non specificato"
+            orari = []
+            
+            for block in text_blocks:
+                b_tag = block.find("b", recursive=False)
+                if not b_tag: continue
+                
+                key = b_tag.get_text(strip=True).replace(":", "")
+                val = b_tag.next_sibling
+                val_text = val.strip(": \n") if isinstance(val, str) else ""
+                
+                if "Insegnamento" in key: 
+                    ins = val_text
+                elif "Docenti titolari" in key or "Docente" in key: 
+                    doc = val_text
+                elif "Percorsi" in key:
+                    ul = block.find("ul")
+                    if ul: percorsi = " | ".join([li.get_text(separator=" ", strip=True) for li in ul.find_all("li")])
+                elif "Orario" in key:
+                    ul = block.find("ul")
+                    if ul: orari = [li.get_text(strip=True) for li in ul.find_all("li")]
+            
+            # Formatta e salva le frasi solo se abbiamo l'orario
+            if ins != "Sconosciuto" and orari:
+                for orario in orari:
+                    frasi.add(f"Insegnamento: {ins} (Docente: {doc}, Percorsi: {percorsi}) -> Orario Ufficiale: {orario}")
+
+        # Fallback (emergenza): Se per qualche motivo mancano i popup, analizziamo la griglia colorata
+        if not frasi:
+            giorni = {}
+            thead = timegrid.find("tr")
+            if thead:
+                headers = thead.find_all("td", recursive=False)
+                for i, th in enumerate(headers):
+                    if i > 0: giorni[i] = th.get_text(strip=True)
+
+            rows = timegrid.find_all("tr", recursive=False)[1:]
+            for row in rows:
+                tds = row.find_all("td", recursive=False)
+                if not tds: continue
+                orario = tds[0].get_text(strip=True)
+                for i in range(1, len(tds)):
+                    # Escludiamo le celle bianche (vuote)
+                    if "FFFFFF" not in tds[i].get("bgcolor", "") and tds[i].get_text(strip=True):
+                        materia_td = tds[i].find(class_="subject_pos1")
+                        aula_td = tds[i].find(class_="subject_pos2")
+                        if materia_td:
+                            mat = materia_td.get_text(strip=True)
+                            au = aula_td.get_text(strip=True) if aula_td else "Aula non specificata"
+                            giorno = giorni.get(i, f"Giorno {i}")
+                            frasi.add(f"Il giorno {giorno} dalle {orario} si terrà {mat} in {au}.")
+                            
+        return "\n".join(sorted(list(frasi))) if frasi else ""
+
+    return ""
+
+def extract_links_and_pdfs(html, current_url, start_url):
+    soup = BeautifulSoup(html, "html.parser")
+    links_to_visit = []
+    pdfs_to_download = []
+    
+    # --- FIX 1: Pulisce i doppi slash che confondono il calcolo dei confini ---
+    start_url = re.sub(r'(?<!:)//+', '/', start_url)
+    current_url = re.sub(r'(?<!:)//+', '/', current_url)
+    
+    base_boundary = start_url.lower().rstrip('/')
+    allowed_domain = urlparse(start_url).netloc
+    is_easycourse = (allowed_domain == "easycourse.unisa.it")
+    
+    if is_easycourse:
+        if base_boundary.endswith('.html'):
+            base_boundary = base_boundary.rsplit('/', 1)[0]
+        elif '/easyroom/index.php' in base_boundary:
+            base_boundary = base_boundary.split('?')[0]
+    
+    valid_boundaries = [base_boundary]
+    
+    for key, alias in CORSI_ALIASES.items():
+        if base_boundary == key.lower():
+            valid_boundaries.append(alias.lower())
+        elif base_boundary == alias.lower():
+            valid_boundaries.append(key.lower())
+
+    # --- FIX 2: INIEZIONE DIRETTA ---
+    # Poiché index.html è un frameset vuoto, forziamo l'aggiunta delle pagine 
+    # che contengono le vere liste di link, saltando il problema del DOM vuoto.
+    if is_easycourse and current_url.lower().endswith('index.html'):
+        base_dir = current_url.rsplit('/', 1)[0]
+        links_to_visit.append(f"{base_dir}/tree.html")
+        links_to_visit.append(f"{base_dir}/ttteacherhtml.html")
+        links_to_visit.append(f"{base_dir}/ttcdlhtml.html")
+
+    for tag in soup.find_all(['a', 'frame', 'iframe', 'option']):
+        href = tag.get('href') or tag.get('src') or tag.get('value')
+        
+        if not href or href.startswith(('javascript:', 'mailto:', 'tel:', '#')):
+            continue
+        if href in ['export_xls', 'null', '-- scegli --']:
+            continue
+
+        if not is_easycourse:
+            if not href.startswith(('http', '/', '#')):
+                href = '/' + href
+
         full_url = urljoin(current_url, href).split('#')[0]
         parsed = urlparse(full_url)
+        link_domain = parsed.netloc
         
-        if full_url.lower().endswith('.pdf') or '/pdf/' in full_url.lower():
-            if parsed.netloc == allowed_domain: pdfs_to_download.append(full_url)
-        elif any(full_url.lower().startswith(b) for b in valid_boundaries):
-            if allowed_domain == "docenti.unisa.it" and [p for p in parsed.path.split('/') if p] and '.' in [p for p in parsed.path.split('/') if p][0]: continue
-            if not any(full_url.lower().endswith(ext) for ext in ['.css', '.js', '.png', '.jpg', '.jpeg']):
-                if '/en/' not in full_url and not full_url.endswith('/en'): links_to_visit.append(full_url)
+        url_l = full_url.lower()
+
+        if url_l.endswith('.pdf') or '/pdf/' in url_l:
+            if link_domain == allowed_domain:
+                pdfs_to_download.append(full_url)
+
+        elif any(url_l.startswith(b) for b in valid_boundaries):
+
+            if allowed_domain == "docenti.unisa.it":
+                path_parts = [p for p in parsed.path.split('/') if p]
+                if path_parts and '.' in path_parts[0]:
+                    continue
+
+            if is_easycourse:
+                if any(t in url_l for t in ['date=', 'data=', 'day=', 'week=', 'month=', 'year=', 'periodo=', 'settimana=']):
+                    continue
+                
+                export_traps = ['esporta=', 'print=', 'ical=', 'view=pdf']
+                if any(t in url_l for t in export_traps):
+                    continue
+
+                if '_lang=' in url_l and '_lang=it' not in url_l:
+                    continue
+
+                is_whitelisted = False
+                
+                if url_l.endswith('/index.html') or url_l.endswith('/tree.html') or url_l.endswith('/main.html'):
+                    is_whitelisted = True
+                elif any(url_l.endswith(view) for view in ['/tthtml.html', '/ttcdlhtml.html', '/ttteacherhtml.html', '/ttdayhtml.html']):
+                    is_whitelisted = True
+                # --- FIX 3: Whitelist allargata per includere TUTTI i Curricula e i Docenti ---
+                elif '/curricula/' in url_l:
+                    is_whitelisted = True
+                elif '/docenti/' in url_l:
+                    is_whitelisted = True
+                elif '/easyroom/' in url_l:
+                    if any(f"area={a}&" in url_l or url_l.endswith(f"area={a}") for a in ['2', '36', '37']):
+                        is_whitelisted = True
+                        
+                if not is_whitelisted:
+                    continue
+            
+            if not any(url_l.endswith(ext) for ext in ['.css', '.js', '.png', '.jpg', '.jpeg']):
+                if '/en/' not in full_url and not full_url.endswith('/en'):
+                    links_to_visit.append(full_url)
+
     return list(set(links_to_visit)), list(set(pdfs_to_download))
 
 def download_and_parse_pdf(pdf_url, state, doc_dict):
@@ -159,27 +452,49 @@ async def crawl_task(task, crawler, state, doc_dict):
             if not current_queue: break
             print(f"\n  [Depth {depth}/{max_depth}] Crawling {len(current_queue)} URL in parallelo...")
 
-            js_cleanup = "const selectors = ['#off-search', '#off-language', '#off-servizi-on-line', '#off-profili', '#box-agenda', '.homeBox', '#logo-footer', '.modal', '#blueimp-gallery', '.blueimp-gallery-controls', '.carousel-control', '.carousel-indicators', '.control-box', '#go_down', '#pause', '#resize', '#scrollUp_div', '.fc-toolbar', '.fc-header-toolbar', '#scrollUp', '#cookie-bar', '#unisa-utilities-bar', '.bg-footer', '.sub-footer'].join(', '); document.querySelectorAll(selectors).forEach(el => { if(el) el.remove(); });"
+            # Rimuoviamo classi generiche come .control-box o toolbar per non distruggere EasyRoom
+            js_cleanup = "const selectors = ['#cookie-bar', '#unisa-utilities-bar', '.bg-footer', '.sub-footer'].join(', '); document.querySelectorAll(selectors).forEach(el => { if(el) el.remove(); });"
             
             results = await crawler.arun_many(
                 urls=current_queue,
                 config=CrawlerRunConfig(
                     cache_mode=CacheMode.BYPASS, word_count_threshold=0,
                     excluded_tags=['footer', 'header', 'form', 'noscript'],
-                    js_code=[js_cleanup], wait_until="networkidle", delay_before_return_html=1.0
+                    js_code=[js_cleanup], wait_until="networkidle"
                 ),
                 max_concurrent=10
             )
 
             next_queue = []
             for result in results:
-                if not result.success or (result.status_code and result.status_code != 200): continue
+                if not result.success or (result.status_code and result.status_code != 200 and result.status_code != 301 and result.status_code != 302): continue
                 
-                # INTERCETTAZIONE CALENDARI
-                testo_calendario = parse_unisa_calendar_to_sentences(result.html) if "calendario-occupazione-spazi" in result.url.lower() else ""
-                if testo_calendario:
-                    testo_da_salvare = f"DATI ORARIO UFFICIALE ESTRATTI:\n\n{testo_calendario}"
-                    print(f"  [CALENDARIO PARSATO] {result.url}")
+                # --- INTERCETTAZIONE CALENDARI E EASYROOM ---
+                if "calendario-occupazione-spazi" in result.url.lower():
+                    testo_calendario = parse_unisa_calendar_to_sentences(result.html)
+                    if testo_calendario:
+                        testo_da_salvare = f"DATI ORARIO UFFICIALE ESTRATTI:\n\n{testo_calendario}"
+                        print(f"  [CALENDARIO PARSATO] {result.url}")
+                    else:
+                        testo_da_salvare = clean_md(result.markdown)
+                        
+                elif "easyroom" in result.url.lower():
+                    # Usa il nuovo parser avanzato per tabelle con rowspan
+                    testo_easyroom = parse_easyroom_table(result.html)
+                    if testo_easyroom:
+                        testo_da_salvare = f"DATI ORARIO EASYROOM:\n\n{testo_easyroom}"
+                        print(f"  [EASYROOM PARSATO] {result.url}")
+                    else:
+                        testo_da_salvare = clean_md(result.markdown)
+                        
+                elif "easycourse" in result.url.lower():
+                    testo_easycourse = parse_easycourse_table(result.html)
+                    if testo_easycourse:
+                        testo_da_salvare = f"DATI ORARI EASYCOURSE:\n\n{testo_easycourse}"
+                        print(f"  [EASYCOURSE PARSATO] {result.url}")
+                    else:
+                        testo_da_salvare = clean_md(result.markdown)
+                        
                 else:
                     testo_da_salvare = clean_md(result.markdown)
 
@@ -212,9 +527,11 @@ async def crawl_task(task, crawler, state, doc_dict):
 async def main():
     state, doc_dict = load_state(), load_knowledge_base()
     SEARCH_TASKS = [
-        {"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 3, "filter": False},
-        {"name": "Docenti", "urls": ["https://docenti.unisa.it/"], "depth": 2, "filter": True},
-        {"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 3, "filter": False}
+        {"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 4, "filter": False},
+        {"name": "Docenti", "urls": ["https://docenti.unisa.it/"], "depth": 3, "filter": True},
+        {"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 3, "filter": False},
+        {"name": "EasyCourse", "urls": EASYCOURSE, "depth": 2, "filter": False},
+        {"name": "EasyRoom", "urls": EASYROOM, "depth": 1, "filter": False}
     ]
 
     async with AsyncWebCrawler(verbose=False) as crawler:
