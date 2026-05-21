@@ -31,18 +31,6 @@ def _safe_extract_string(output) -> str:
         return ""
     return str(output)
 
-# --- FIX GEMINI: Funzione di estrazione sicura ---
-def _safe_extract_string(output) -> str:
-    """Previene l'errore 'list object has no attribute strip'."""
-    if isinstance(output, list):
-        if len(output) > 0:
-            if isinstance(output[0], dict):
-                return str(output[0].get("text", ""))
-            return str(output[0])
-        return ""
-    return str(output)
-# -------------------------------------------------
-
 def condense_question_node(state: RAGState):
     question = state["question"]
     history_list = state.get("chat_history", [])
@@ -85,7 +73,7 @@ def domain_guard_node(state: RAGState):
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", DOMAIN_PROMPT),
-        ("human", "Domanda utente: {question}")
+        ("human", f"Domanda utente: {question}")
     ])
     chain = prompt | load_llm(state.get("current_model")) | StrOutputParser()
 
