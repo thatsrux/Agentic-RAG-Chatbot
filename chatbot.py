@@ -92,7 +92,6 @@ def main():
 
     should_generate = False
     if user_input:
-        # 1. Memorizziamo il messaggio utente
         st.session_state.messages.append({"role": "user", "content": user_input})
         should_generate = True
 
