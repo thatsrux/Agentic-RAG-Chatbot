@@ -2,7 +2,7 @@ import streamlit as st
 from langchain_ollama import ChatOllama
 from deepeval import evaluate
 from deepeval.models.base_model import DeepEvalBaseLLM
-from deepeval.test_case import LLMTestCase, LLMTestCaseParams
+from deepeval.test_case import LLMTestCase, SingleTurnParams
 from deepeval.metrics import (
     ContextualPrecisionMetric,
     ContextualRecallMetric,
@@ -49,7 +49,7 @@ metrics = [
     GEval(
         name="Factual Correctness",
         criteria="Determina se la risposta effettiva (actual output) è fattualmente corretta e concorda in modo accurato con l'output atteso (expected output).",
-        evaluation_params=[LLMTestCaseParams.ACTUAL_OUTPUT, LLMTestCaseParams.EXPECTED_OUTPUT],
+        evaluation_params=[SingleTurnParams.ACTUAL_OUTPUT, SingleTurnParams.EXPECTED_OUTPUT],
         threshold=0.7,
         model=judge
     )
