@@ -27,6 +27,7 @@ os.makedirs(PAGES_DIR, exist_ok=True)
 os.makedirs(PDF_MD_DIR, exist_ok=True)
 
 KEYWORDS = ["DIEM", "DIPARTIMENTO DI INGEGNERIA DELL'INFORMAZIONE", "INGEGNERIA INFORMATICA"]
+
 CORSI_DIEM_URLS = [
     "https://corsi.unisa.it/ingegneria-dell-informazione-per-la-medicina-digitale",
     "https://corsi.unisa.it/ingegneria-informatica",
@@ -53,9 +54,6 @@ EASYROOM = [
     "https://easycourse.unisa.it/EasyRoom/index.php?vista=week&content=view_prenotazioni&area=37&_lang=it&room=18",
     "https://easycourse.unisa.it/EasyRoom/index.php?vista=week&content=view_prenotazioni&area=36&_lang=it&room=15"
 ]
-    
-
-
 
 def load_state():
     if os.path.exists(STATE_FILE):
@@ -527,10 +525,10 @@ async def crawl_task(task, crawler, state, doc_dict):
 async def main():
     state, doc_dict = load_state(), load_knowledge_base()
     SEARCH_TASKS = [
-        {"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 4, "filter": False},
-        {"name": "Docenti", "urls": ["https://docenti.unisa.it/"], "depth": 3, "filter": True},
-        {"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 3, "filter": False},
-        {"name": "EasyCourse", "urls": EASYCOURSE, "depth": 2, "filter": False},
+        #{"name": "Sito DIEM", "urls": ["https://www.diem.unisa.it/"], "depth": 4, "filter": False},
+        #{"name": "Docenti", "urls": ["https://docenti.unisa.it/"], "depth": 3, "filter": True},
+        #{"name": "Corsi DIEM", "urls": CORSI_DIEM_URLS, "depth": 3, "filter": False},
+        #{"name": "EasyCourse", "urls": EASYCOURSE, "depth": 2, "filter": False},
         {"name": "EasyRoom", "urls": EASYROOM, "depth": 1, "filter": False}
     ]
 
