@@ -38,7 +38,7 @@ def load_llm(selected_model: str = "gemini-3.1-flash-lite"):
     mistral = ChatOllama(
         model=OLLAMA_MODEL, 
         temperature=0.1,
-        max_output_tokens=1024 # Limita la lunghezza della risposta per mantenerlo conciso
+        num_ctx=8192 
     )
         
     if selected_model == "gemini-3.1-flash-lite":

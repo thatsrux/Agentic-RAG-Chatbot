@@ -202,6 +202,7 @@ class HybridRetriever:
             print(f"  [BM25] Indexed {len(docs)} documents.")
 
         except Exception as e:
+
             print(f"  [BM25] Failed: {e}")
 
     # =====================================================
