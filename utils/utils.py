@@ -2,7 +2,6 @@ import os
 import streamlit as st
 from langchain_ollama import ChatOllama
 from langchain_google_genai import ChatGoogleGenerativeAI
-from utils.config import OLLAMA_MODEL
 
 if "GOOGLE_API_KEY" in st.secrets:
     os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
@@ -36,22 +35,27 @@ def load_llm(selected_model: str = "gemini-3.1-flash-lite"):
     )
     
     mistral = ChatOllama(
-        model=OLLAMA_MODEL, 
+        model="mistral-nemo", 
+        temperature=0.1,
+        num_ctx=8192 
+    )
+
+    llama = ChatOllama(
+        model = "llama3.1",
         temperature=0.1,
         num_ctx=8192 
     )
         
     if selected_model == "gemini-3.1-flash-lite":
         return gemini_31.with_fallbacks([gemini_35, gemini_25, mistral])
-
     elif selected_model == "gemini-3.5-flash":
         return gemini_35.with_fallbacks([gemini_31, gemini_25, mistral])
-        
     elif selected_model == "gemini-2.5-flash":
         return gemini_25.with_fallbacks([gemini_31, gemini_35, mistral])
-    
+    elif selected_model == "mistral-nemo":
+        return mistral.with_fallbacks([llama])
     else: 
-        return mistral
+        return llama
 
 def format_context(docs):
     """Formatta i documenti per il prompt dell'LLM."""

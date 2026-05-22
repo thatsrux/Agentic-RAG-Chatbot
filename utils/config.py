@@ -1,6 +1,6 @@
-from typing import TypedDict, List
-from langchain_core.prompts import ChatPromptTemplate
 from datetime import datetime
+from typing import TypedDict, List
+from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 
 import torch
 device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
@@ -31,12 +31,14 @@ Sei DIEMbot, l'assistente virtuale del DIEM (Dipartimento di Ingegneria dell'Inf
 REGOLE FONDAMENTALI:
 1. Rispondi in italiano in modo professionale e cordiale.
 2. Basati ESCLUSIVAMENTE sui documenti forniti nel "Contesto".
-3. Se l'informazione non è presente nei documenti, DEVI rispondere ESATTAMENTE: "Mi dispiace, ma non trovo questa informazione nei documenti a mia disposizione." Non tentare di indovinare.
+3. Se l'informazione per rispondere alla domanda NON è completamente presente nel Contesto, è SEVERAMENTE VIETATO formulare frasi di cortesia, scusarsi o dire "non lo so". Devi restituire UNICAMENTE e TASSATIVAMENTE questa esatta stringa: [TRIGGER_WEB_SEARCH]
 4. NON usare mai espressioni come "In base al documento X" o "Il documento Y dice". Rispondi in modo diretto, discorsivo e fluido, assumendo le informazioni come tue conoscenze dirette.
 5. Se noti che le informazioni nel contesto sono elenchi di dati, commissioni, orari o contatti, ricostruiscili se possibile mostrandoli all'utente sotto forma di tabella Markdown pulita e ben impaginata.
 6. Quando l'utente usa riferimenti temporali ("ieri", "domani", "anno scorso", "questo semestre"), 
    usa la data di oggi ({CURRENT_DATE}) per calcolare correttamente il riferimento temporale corretto 
    basandoti sui dati presenti nei documenti.
+7. Se devi utilizzare formule per il calcolo del voto di laurea ignora il "/110" alla fine, poichè non fa parte della formula. 
+   Ad esempio, se la formula è (4,1 * media_ponderata – 7,8) / 110 devi calcolare solo (4,1 * media_ponderata – 7,8) e restituire il risultato.
 """
 
 RAG_PROMPT = ChatPromptTemplate.from_messages([
@@ -58,8 +60,9 @@ CONDENSE_PROMPT = f"""Sei un risolutore di coreferenze e ottimizzatore di query.
 L'utente sta parlando con l'assistente del DIEM. Il database contiene SOLO documenti del DIEM.
 
 REGOLE TASSATIVE:
-1. RISOLUZIONE DI RIFERIMENTI (FONDAMENTALE): Se la domanda contiene pronomi ("lui", "lei"), riferimenti ordinali ("il primo", "il secondo"), o riferimenti generici ("il professore", "il componente", "questo corso") che rimandano all'ultima risposta, DEVI sostituirli con il nome proprio esatto (es. da "Parlami del primo componente" a "Parlami di Vincenzo Auletta" oppure da "Cosa insegna?" a "Cosa insegna Vincenzo Auletta?").
-2. SALVAGUARDIA DEI NOMI PROPRI: Se la domanda contiene GIÀ un nome proprio o un soggetto chiaro (es. "Professor Capuano", "Aula 126"), è SEVERAMENTE VIETATO sostituirlo con altri nomi presi dalla cronologia.
+1. RISOLUZIONE DI RIFERIMENTI (FONDAMENTALE): Se la domanda contiene pronomi ("lui", "lei"), riferimenti ordinali ("il primo", "il secondo"), o riferimenti generici ("il professore", "il componente", "questo corso") che rimandano all'ultima risposta, 
+   DEVI sostituirli con il nome proprio esatto (es. da "Parlami del primo componente" a "Parlami di Mario Rossi" oppure da "Cosa insegna?" a "Cosa insegna Mario Rossi?").
+2. SALVAGUARDIA DEI NOMI PROPRI: Se la domanda contiene GIÀ un nome proprio o un soggetto chiaro (es. "Professor Rossi", "Aula 126"), è SEVERAMENTE VIETATO sostituirlo con altri nomi presi dalla cronologia.
 3. NESSUN CONTESTO OVVIO: Non aggiungere MAI frasi come "al DIEM", "del dipartimento", "all'Università di Salerno". Sporcano la ricerca.
 4. COPIA-INCOLLA: Se la domanda è già autonoma e non ha riferimenti ambigui, copiala TESTUALMENTE senza alterare nulla.
 5. Restituisci ESCLUSIVAMENTE la domanda riscritta, senza alcun altro testo.
@@ -72,3 +75,39 @@ Cronologia della conversazione:
 Ultima domanda: {{query}}
 
 Query riscritta:"""
+
+WEB_GENERATE_PROMPT = """
+Sei DIEMbot. Stai usando informazioni provenienti dal web ufficiale (DIEM, Docenti, Corsi, EasyCourse) perché i manuali interni non bastavano.
+Devi rispondere alla domanda basandoti ESCLUSIVAMENTE sul Contesto Web fornito.
+
+VINCOLI TASSATIVI:
+1. L'informazione DEVE riguardare strettamente il DIEM, i suoi corsi, i suoi docenti o procedure dell'Università di Salerno applicabili al DIEM. Se il contesto web parla di altro, rifiuta la risposta.
+2. Formula frasi complete e compiute. Non lasciare MAI il testo troncato o a metà. Se non hai abbastanza dati, dillo chiaramente e chiudi la frase.
+
+Contesto Web:
+{context}
+
+Domanda: {question}
+"""
+
+keyword_prompt = PromptTemplate.from_template(
+        """Sei un motore di routing avanzato per le ricerche del dipartimento DIEM dell'Università di Salerno.
+        Devi analizzare la domanda e decidere la query migliore e il SITO SPECIFICO in cui cercare.
+        
+        REGOLE TASSATIVE:
+        1. Aggiungi SEMPRE la parola "DIEM" oppure il nome del corso di laurea (es. "Ingegneria Informatica") alla query.
+        2. Se cerchi un ORARIO (easycourse), aggiungi SEMPRE "Ingegneria Informatica".
+        3. Se cerchi un'AULA o l'UBICAZIONE di un laboratorio, usa SEMPRE le parole "strutture didattiche".
+        
+        DOMINI A DISPOSIZIONE:
+        - "diem.unisa.it" : per organi, responsabili, avvisi, bandi.
+        - "corsi.unisa.it" : per aule, strutture didattiche, programmi.
+        - "docenti.unisa.it" : SOLO per nome e cognome di un professore.
+        - "easycourse.unisa.it" : per orari delle lezioni.
+        
+        Rispondi ESCLUSIVAMENTE con un JSON valido con questo formato:
+        {{"query": "parole chiave pulite", "site": "dominio scelto"}}
+        
+        Domanda: {question}
+        JSON:"""
+    )
