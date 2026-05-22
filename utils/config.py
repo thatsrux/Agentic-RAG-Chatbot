@@ -2,7 +2,6 @@ from datetime import datetime
 from typing import TypedDict, List
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 
-
 import torch
 device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
