@@ -1,12 +1,9 @@
 #general
 __pycache__/
-.streamlit/
+llm_env/
+.streamlit/secrets.toml
 log.txt
 
 # Ignore database files
 knowledge/
 knowledge_old/
-
-llm_env/
-
-.streamlit/secrets.toml

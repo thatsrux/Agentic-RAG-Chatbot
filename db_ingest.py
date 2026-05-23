@@ -1,67 +1,18 @@
 import pickle
 import os
 import shutil
-import re
 from langchain_community.vectorstores import FAISS
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import MarkdownTextSplitter, RecursiveCharacterTextSplitter
 from langchain_classic.retrievers.parent_document_retriever import ParentDocumentRetriever
 from langchain_classic.storage import LocalFileStore, create_kv_docstore
-
-from utils.config import device
-
-# --- CONFIGURAZIONE ---
-KB_FILE = "knowledge/knowledge_base.pkl"
-VS_DIR = "knowledge/vectorstores"
-
-# WEB
-WEB_CHILD_SIZE = 800
-WEB_CHILD_OVERLAP = 80
-WEB_PARENT_SIZE = 3000
-WEB_PARENT_OVERLAP = 300
-
-# PDF
-PDF_CHILD_SIZE = 800
-PDF_CHILD_OVERLAP = 80
-PDF_PARENT_SIZE = 3000
-PDF_PARENT_OVERLAP = 300
+from utils.ingest_utils import *
 
 os.makedirs(VS_DIR, exist_ok=True)
 
-def get_embedding_model():
-    print("[EMB] Caricamento BAAI/bge-m3...")
-    return HuggingFaceEmbeddings(
-        model_name="BAAI/bge-m3", 
-        model_kwargs={"device": device},
-        encode_kwargs={
-            "normalize_embeddings": True,
-            "batch_size": 64
-        }
-    )
-
-def universal_markdown_cleaner(text: str) -> str:
-    """
-    Pulisce e normalizza il Markdown generato dagli scraper per 
-    aiutare il Text Splitter a tagliare nei punti giusti.
-    """
-    if not text:
-        return ""
-
-    # 1. RIMOZIONE URL (SICURA): Rimuove i link MA ignora le immagini
-    text = re.sub(r'(?<!\!)\[([^\]]+)\]\([^)]+\)', r'\1', text)
-    
-    # 2. SALVATAGGIO TABELLE: Inserisce \n\n se una riga finisce con '|' e la successiva ha testo
-    text = re.sub(r'(\|\s*)\n([a-zA-Z0-9\[])', r'\1\n\n\2', text)
-
-    # 3. NORMALIZZAZIONE DEI TITOLI: Assicura un solo \n\n prima di un titolo
-    text = re.sub(r'\n+#+\s+', r'\n\n# ', text)
-    
-    # 4. PULIZIA FINALE: Collassa i ritorni a capo eccessivi a un massimo di due (\n\n)
-    text = re.sub(r'\n{3,}', r'\n\n', text)
-    
-    return text
-
 def main():
+    """
+    Script di ingestione per la knowledge base. Carica i documenti salvati, li pulisce e li indicizza in FAISS utilizzando una struttura Parent-Child per mantenere il contesto.
+    """
     if not os.path.exists(KB_FILE):
         print(f"[ERRORE] File {KB_FILE} non trovato.")
         return
@@ -85,7 +36,7 @@ def main():
     # ==========================================
     # 1. Indicizzazione WEB (FAISS + Parent-Child)
     # ==========================================
-    print("\n[WEB] Inizio indicizzazione Parent-Child per il Web...")
+    print("\n[WEB] Inizio indicizzazione Parent-Child per il Web.")
     
     web_child_splitter = MarkdownTextSplitter(
         chunk_size=WEB_CHILD_SIZE, 
@@ -102,7 +53,6 @@ def main():
     if os.path.exists(faiss_web_path): shutil.rmtree(faiss_web_path)
     if os.path.exists(docstore_web_path): shutil.rmtree(docstore_web_path)
 
-    # Inizializza FAISS Web con il token __dummy__
     web_child_vs = FAISS.from_texts(["__dummy__"], emb)
     web_parent_store = create_kv_docstore(LocalFileStore(docstore_web_path))
 
@@ -129,7 +79,7 @@ def main():
     # ==========================================
     # 2. Indicizzazione PDF (FAISS + Parent-Child)
     # ==========================================
-    print("\n[PDF] Inizio indicizzazione Parent-Child per i PDF...")
+    print("\n[PDF] Inizio indicizzazione Parent-Child per i PDF.")
     
     pdf_child_splitter = RecursiveCharacterTextSplitter(
         chunk_size=PDF_CHILD_SIZE, 
