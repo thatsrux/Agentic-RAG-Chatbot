@@ -1,14 +1,13 @@
 import json
 import re
 import requests
-import streamlit as st
 from bs4 import BeautifulSoup
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from utils.config import *
-from utils.utils import load_llm, format_context
+from utils.chatbot_utils import load_llm, format_context, is_valid_url
 from utils.retriever import HybridRetriever
-from crawling import KEYWORDS, CORSI_DIEM_URLS
+from utils.crawling_utils import KEYWORDS
 from langgraph.graph import StateGraph, START, END
 from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
 
@@ -22,14 +21,24 @@ MAGENTA = "\033[95m"
 RED     = "\033[91m"
 GRAY    = "\033[90m"
 
+RETRIEVER = HybridRetriever()
+
 def _log(color, tag, msg):
+    """
+    Logga un messaggio con un tag colorato e in grassetto.
+    """
     print(f"{BOLD}{color}[{tag}]{RESET} {color}{msg}{RESET}")
 
 def _sep(color, label):
+    """
+    Stampa una linea di separazione colorata con un'etichetta al centro.
+    """
     print(f"\n{BOLD}{color}{'━'*20} {label} {'━'*20}{RESET}")
 
 def _safe_extract_string(output) -> str:
-    """Previene l'errore 'list object has no attribute strip'."""
+    """
+    Estrae una stringa in modo sicuro da un output che potrebbe essere una lista.
+    """
     if isinstance(output, list):
         if len(output) > 0:
             if isinstance(output[0], dict):
@@ -39,15 +48,14 @@ def _safe_extract_string(output) -> str:
     return str(output)
 
 def condense_question_node(state: RAGState):
+    """
+    Riformula la domanda dell'utente in modo più conciso, tenendo conto della cronologia recente della conversazione.
+    """
     question = state["question"]
     history_list = state.get("chat_history", [])
     
     _sep(CYAN, "CONDENSE QUESTION")
     _log(CYAN, "CONDENSE", f"INPUT  question : {question}")
-
-    # if not history_list:
-    #     _log(CYAN, "CONDENSE", "Nessuna history → skip LLM")
-    #     return {"question": question}
 
     recent_history = history_list[-4:] if len(history_list) > 4 else history_list
     chat_history_str = ""
@@ -74,6 +82,10 @@ def condense_question_node(state: RAGState):
 
 
 def domain_guard_node(state: RAGState):
+    """
+    Controlla se la domanda dell'utente è pertinente al dominio accademico del DIEM.
+    Se non lo è, blocca la conversazione e restituisce un messaggio di cortesia.
+    """
     question = state["question"]
     _sep(YELLOW, "DOMAIN GUARD")
     _log(YELLOW, "DOMAIN_GUARD", f"INPUT  question : {question}")
@@ -102,15 +114,20 @@ def domain_guard_node(state: RAGState):
     return {"is_in_domain": "si"}
 
 def route_after_domain(state: RAGState):
+    """
+    Determina il percorso dopo il nodo di domain guard.
+    """
     return "out_of_domain" if state.get("is_in_domain") == "no" else "in_domain"
 
-retriever = HybridRetriever()
 def retrieve_node(state: RAGState):
+    """
+    Esegue la fase di retrieval, ottenendo i documenti più rilevanti per la domanda dell'utente e formattando il contesto da fornire al modello.
+    """
     question = state["question"]
     _sep(GREEN, "RETRIEVE")
     _log(GREEN, "RETRIEVE", f"INPUT  question   : {question}")
     
-    docs = retriever.retrieve(question)
+    docs = RETRIEVER.retrieve(question)
     _log(GREEN, "RETRIEVE", f"OUTPUT docs count : {len(docs)}")
     
     context = format_context(docs)
@@ -118,6 +135,9 @@ def retrieve_node(state: RAGState):
     return {"context": context, "sources": sources}
 
 def generate_node(state: RAGState):
+    """
+    Esegue la fase di generazione, formulando la risposta dell'assistente basandosi esclusivamente sui documenti recuperati.
+    """
     _sep(MAGENTA, "GENERATE")
     _log(MAGENTA, "GENERATE", f"INPUT  question           : {state['question']}")
     
@@ -136,37 +156,21 @@ def generate_node(state: RAGState):
     return {"generation": response_text, "model_used": model_used}
 
 def route_after_generation(state: RAGState):
+    """
+    Determina il percorso dopo il nodo di generazione, verificando se la risposta contiene il trigger per la ricerca web.
+    """
     generation = state.get("generation", "")
     if "[TRIGGER_WEB_SEARCH]" in generation:
         return "go_to_web"
     return "go_to_end"
 
 def web_search_node(state: RAGState):
+    """
+    Esegue una ricerca web mirata per trovare informazioni aggiuntive nei siti ufficiali del DIEM e dell'Università di Salerno,
+    solo se la generazione precedente ha indicato che le informazioni nei documenti non erano sufficienti.
+    """
     _sep(RED, "WEB SEARCH")
     question = state["question"]
-    
-    def is_valid_url(url: str) -> bool:
-        clean_url = url.replace("https://", "").replace("http://", "").replace("www.", "")
-        
-        if clean_url.lower().endswith((".xls", ".xlsx", ".pdf", ".doc", ".docx")):
-            return False
-            
-        if "diem.unisa.it" in clean_url or "docenti.unisa.it" in clean_url:
-            return True
-            
-        if "corsi.unisa.it" in clean_url:
-            if "calendario-occupazione-spazi" in clean_url:
-                return False
-            if "strutture-didattiche" in clean_url:
-                return True
-            return any(corso in clean_url for corso in CORSI_DIEM_URLS)
-            
-        if "easycourse.unisa.it" in clean_url:
-            if "Dipartimento_di_" in clean_url and "dellInformazione" not in clean_url:
-                return False
-            return True
-            
-        return False
 
     keyword_chain = keyword_prompt | load_llm(state.get("current_model")) | StrOutputParser()
     
@@ -260,6 +264,9 @@ def web_search_node(state: RAGState):
     }
 
 def build_graph():
+    """
+    Costruisce e compila il grafo di stato per la pipeline RAG, definendo i nodi e le transizioni.
+    """
     workflow = StateGraph(RAGState)
 
     workflow.add_node("condense_question", condense_question_node)
