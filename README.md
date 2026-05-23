@@ -100,7 +100,7 @@ ollama run llama3.1
 Una volta configurato l'ambiente, avvia l'assistente virtuale con:
 
 ```bash
-streamlit run chatbot.py
+streamlit run chatbot.py --server.fileWatcherType none
 ```
 
 L'interfaccia sarà disponibile all'indirizzo `http://localhost:8501`.
