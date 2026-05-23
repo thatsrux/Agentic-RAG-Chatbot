@@ -101,6 +101,9 @@ def domain_guard_node(state: RAGState):
         }
     return {"is_in_domain": "si"}
 
+def route_after_domain(state: RAGState):
+    return "out_of_domain" if state.get("is_in_domain") == "no" else "in_domain"
+
 retriever = HybridRetriever()
 def retrieve_node(state: RAGState):
     question = state["question"]
@@ -132,8 +135,11 @@ def generate_node(state: RAGState):
     
     return {"generation": response_text, "model_used": model_used}
 
-def route_after_domain(state: RAGState):
-    return "out_of_domain" if state.get("is_in_domain") == "no" else "in_domain"
+def route_after_generation(state: RAGState):
+    generation = state.get("generation", "")
+    if "[TRIGGER_WEB_SEARCH]" in generation:
+        return "go_to_web"
+    return "go_to_end"
 
 def web_search_node(state: RAGState):
     _sep(RED, "WEB SEARCH")
@@ -246,18 +252,12 @@ def web_search_node(state: RAGState):
     if "mi dispiace" in response_text.lower() or not response_text:
         response_text = "Mi dispiace, ma non trovo questa informazione nei documenti del DIEM né sui canali ufficiali autorizzati."
 
-    _log(RED, "WEB_SEARCH", f"OUTPUT response: {response_text[:300]}")
+    _log(RED, "WEB_SEARCH", f"OUTPUT response: {response_text}")
 
     return {
         "generation": response_text, 
         "sources": state.get("sources", []) + source_urls
     }
-
-def route_after_generation(state: RAGState):
-    generation = state.get("generation", "")
-    if "[TRIGGER_WEB_SEARCH]" in generation:
-        return "go_to_web"
-    return "go_to_end"
 
 def build_graph():
     workflow = StateGraph(RAGState)
