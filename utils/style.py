@@ -1,5 +1,7 @@
 def get_global_css() -> str:
-    """CSS globale per migliorare UX e UI dell'intera app ed eliminare i bug nativi."""
+    """
+    CSS globale per migliorare UX e UI dell'intera app ed eliminare i bug nativi.
+    """
     return """
     <style>
     /* Importa un font moderno (Inter) */
@@ -106,14 +108,18 @@ def get_global_css() -> str:
     """
 
 def get_header_html() -> str:
-    """Genera l'HTML pulito per l'intestazione principale senza componenti nativi di Streamlit."""
+    """
+    Genera l'HTML pulito per l'intestazione principale senza componenti nativi di Streamlit.
+    """
     return """<div style="margin-bottom: 2rem; text-align: left;">
 <h1 style="font-size: 2.5rem; font-weight: 700; color: #f8fafc; margin: 0; padding: 0; display: flex; align-items: center; gap: 10px;">🎓 DIEMbot</h1>
 <p style="color: #94a3b8; font-size: 14px; margin: 4px 0 0 0; padding: 0;">Assistente virtuale ufficiale del DIEM – Università di Salerno</p>
 </div>"""
 
 def get_welcome_screen_html() -> str:
-    """Genera l'HTML per la schermata di benvenuto iniziale."""
+    """
+    Genera l'HTML per la schermata di benvenuto iniziale.
+    """
     return """<div class="welcome-container">
 <div style="font-size: 64px; margin-bottom: 1rem; filter: drop-shadow(0 0 15px rgba(56, 189, 248, 0.25));">👋</div>
 <div style="font-size: 2rem; font-weight: 700; background: linear-gradient(to right, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.5rem; line-height: 1.2;">
@@ -136,7 +142,9 @@ Come posso aiutarti oggi?
 </div>"""
 
 def get_info_icon_html(model_name: str) -> str:
-    """Genera l'HTML e il CSS per l'icona 'i' con il tooltip."""
+    """
+    Genera l'HTML e il CSS per l'icona 'i' con il tooltip.
+    """
     return f"""
     <style>
     .tooltip-container {{

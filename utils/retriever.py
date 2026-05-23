@@ -8,31 +8,23 @@ from langchain_classic.retrievers.parent_document_retriever import ParentDocumen
 from langchain_classic.storage import LocalFileStore, create_kv_docstore
 from langchain_text_splitters import MarkdownTextSplitter, RecursiveCharacterTextSplitter
 from sentence_transformers import CrossEncoder
-from rank_bm25 import BM25Okapi
 from utils.config import device
+from rank_bm25 import BM25Okapi
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["HF_TOKEN"] = "HF_TOKEN_REMOVED"
 
-# =========================================================
-# CONFIG
-# =========================================================
-
 VS_DIR = "knowledge/vectorstores"
-
 K_WEB = 20
 K_PDF = 10
-
 TOP_N = 5
 
-# WEB
 WEB_CHILD_SIZE = 800
 WEB_CHILD_OVERLAP = 80
 WEB_PARENT_SIZE = 3000
 WEB_PARENT_OVERLAP = 300
 
-# PDF
 PDF_CHILD_SIZE = 800
 PDF_CHILD_OVERLAP = 80
 PDF_PARENT_SIZE = 3000
@@ -45,22 +37,21 @@ BM25_ENABLED = True
 # =========================================================
 
 class HybridRetriever:
-
+    """
+    Implementazione di un retriever ibrido che combina retrieval basato su embedding (FAISS) e retrieval basato su keyword (BM25).
+    """
     def __init__(self):
-
-        print("[RETRIEVER] Initializing system...")
+        """
+        Inizializza il retriever caricando i modelli di embedding, i vectorstore per web e PDF, il modello di reranking e costruendo l'indice BM25 se abilitato.
+        """
+        print("[RETRIEVER] Initializing system.")
 
         self.emb = self._load_embedding_model()
-
         self.web_retriever, self.web_vs = self._load_web_retriever()
-
         self.pdf_retriever = self._load_pdf_retriever()
-
         self.reranker = self._load_reranker()
-
         self.bm25 = None
         self.bm25_docs = []
-
         if BM25_ENABLED:
             self._initialize_bm25()
 
@@ -71,8 +62,10 @@ class HybridRetriever:
     # =====================================================
 
     def _load_embedding_model(self):
-
-        print("  [EMB] Loading BAAI/bge-m3...")
+        """
+         Carica il modello di embedding BAAI/bge-m3, configurato per l'uso su GPU se disponibile, con normalizzazione e batch size ottimizzato.
+        """
+        print("  [EMB] Loading BAAI/bge-m3.")
 
         return HuggingFaceEmbeddings(
             model_name="BAAI/bge-m3",
@@ -90,21 +83,21 @@ class HybridRetriever:
     # =====================================================
 
     def _load_web_retriever(self):
-
-        print("  [WEB] Loading Parent-Child FAISS Web...")
+        """
+        Carica il retriever per i documenti web, utilizzando una struttura parent-child con FAISS per i child e un docstore locale per i parent.
+        """
+        print("  [WEB] Loading Parent-Child FAISS Web.")
 
         child_vectorstore = FAISS.load_local(
             os.path.join(VS_DIR, "faiss_web_child"),
             self.emb,
             allow_dangerous_deserialization=True
         )
-
         parent_docstore = create_kv_docstore(
             LocalFileStore(
                 os.path.join(VS_DIR, "docstore_web")
             )
         )
-
         retriever = ParentDocumentRetriever(
             vectorstore=child_vectorstore,
             docstore=parent_docstore,
@@ -124,15 +117,16 @@ class HybridRetriever:
         return retriever, child_vectorstore
 
     def _load_pdf_retriever(self):
-
-        print("  [PDF] Loading Parent-Child FAISS PDF...")
+        """
+        Carica il retriever per i documenti PDF, utilizzando una struttura parent-child con FAISS per i child e un docstore locale per i parent.
+        """
+        print("  [PDF] Loading Parent-Child FAISS PDF.")
 
         child_vectorstore = FAISS.load_local(
             os.path.join(VS_DIR, "faiss_pdf_child"),
             self.emb,
             allow_dangerous_deserialization=True
         )
-
         parent_docstore = create_kv_docstore(
             LocalFileStore(
                 os.path.join(VS_DIR, "docstore_pdf")
@@ -162,7 +156,11 @@ class HybridRetriever:
     # =====================================================
 
     def _load_reranker(self):
-        print("  [RERANKER] Loading BAAI/bge-reranker-v2-m3...")
+        """
+        Carica il modello di reranking BAAI/bge-reranker-v2-m3, configurato per l'uso su GPU se disponibile,
+        con batch size ottimizzato e lunghezza massima aumentata per gestire meglio i documenti lunghi.
+        """
+        print("  [RERANKER] Loading BAAI/bge-reranker-v2-m3.")
         return CrossEncoder(
             "BAAI/bge-reranker-v2-m3",
             model_kwargs={"torch_dtype": torch.float16},
@@ -175,57 +173,50 @@ class HybridRetriever:
     # =====================================================
 
     def _initialize_bm25(self):
-
-        print("  [BM25] Building sparse index...")
+        """
+        Inizializza l'indice BM25 caricando i documenti web child, tokenizzandoli e costruendo l'indice BM25.
+        """
+        print("  [BM25] Building sparse index.")
 
         try:
-
             docs = []
-
-            # Carica i chunk Web Child per costruire l'indice delle keyword
             web_docs = self.web_vs.similarity_search(
                 "test",
                 k=100000
             )
-
             docs.extend(web_docs)
 
             self.bm25_docs = docs
-
             tokenized = [
                 d.page_content.lower().split()
                 for d in docs
             ]
-
             self.bm25 = BM25Okapi(tokenized)
 
             print(f"  [BM25] Indexed {len(docs)} documents.")
 
         except Exception as e:
-
             print(f"  [BM25] Failed: {e}")
 
     # =====================================================
-    # DEDUP
+    # DEDUPLICATION
     # =====================================================
 
     def _dedup(self, docs):
-
+        """
+        Rimuove documenti duplicati basandosi su un hash del contenuto, mantenendo solo documenti unici.
+        """
         seen = set()
         output = []
 
         for doc in docs:
-
             content = doc.page_content.strip()
-
             key = hashlib.md5(
                 content.encode("utf-8")
             ).hexdigest()
 
             if key not in seen:
-
                 seen.add(key)
-
                 output.append(doc)
 
         return output
@@ -235,15 +226,14 @@ class HybridRetriever:
     # =====================================================
 
     def _retrieve_web(self, query):
-
+        """
+        Esegue il retrieval sui documenti web utilizzando il retriever parent-child, restituendo i documenti più rilevanti.
+        """
         try:
-
             return self.web_retriever.invoke(query)
 
         except Exception as e:
-
             print(f"[WEB] Retrieval failed: {e}")
-
             return []
 
     # =====================================================
@@ -251,15 +241,14 @@ class HybridRetriever:
     # =====================================================
 
     def _retrieve_pdf(self, query):
-
+        """
+        Esegue il retrieval sui documenti PDF utilizzando il retriever parent-child, restituendo i documenti più rilevanti.
+        """
         try:
-
             return self.pdf_retriever.invoke(query)
 
         except Exception as e:
-
             print(f"[PDF] Retrieval failed: {e}")
-
             return []
 
     # =====================================================
@@ -267,16 +256,15 @@ class HybridRetriever:
     # =====================================================
 
     def _retrieve_bm25(self, query):
-
+        """
+        Esegue il retrieval sui documenti web utilizzando l'indice BM25, restituendo i documenti più rilevanti in base alla similarità keyword.
+        """
         if self.bm25 is None:
             return []
 
         try:
-
             tokens = query.lower().split()
-
             scores = self.bm25.get_scores(tokens)
-
             ranked = sorted(
                 zip(self.bm25_docs, scores),
                 key=lambda x: x[1],
@@ -285,13 +273,11 @@ class HybridRetriever:
 
             return [
                 doc
-                for doc, score in ranked[:K_WEB]
+                for doc, _ in ranked[:K_WEB]
             ]
 
         except Exception as e:
-
             print(f"[BM25] Retrieval failed: {e}")
-
             return []
 
     # =====================================================
@@ -299,7 +285,9 @@ class HybridRetriever:
     # =====================================================
 
     def retrieve(self, query, route="both"):
-
+        """
+        Funzione principale di retrieval che esegue il retrieval parallelo sui documenti web, PDF e BM25 (se abilitato),
+        """
         web_chunks = []
         pdf_chunks = []
         bm25_chunks = []
@@ -336,8 +324,7 @@ class HybridRetriever:
                     query
                 )
 
-            # COLLECT
-
+            # COLLECT RESULTS
             if "web" in futures:
                 web_chunks = futures["web"].result()
 
@@ -358,7 +345,6 @@ class HybridRetriever:
         )
 
         if not all_candidates:
-
             return []
 
         # =================================================
@@ -394,7 +380,6 @@ class HybridRetriever:
                 continue
 
             doc.metadata["rerank_score"] = float(score)
-
             final_docs.append(doc)
 
         final_docs = sorted(
@@ -412,10 +397,8 @@ if __name__ == "__main__":
     while True:
 
         query = input("\nQuery > ").strip()
-
         if query.lower() in ["exit", "quit"]:
             break
-
         docs = retriever.retrieve(query)
 
         print("\n================ RESULTS ================\n")
@@ -423,13 +406,8 @@ if __name__ == "__main__":
         for i, doc in enumerate(docs, start=1):
 
             print(f"[{i}] Score: {doc.metadata.get('rerank_score'):.4f}")
-
             print(f"Type: {doc.metadata.get('type')}")
-
             print(f"Source: {doc.metadata.get('source')}")
-
             print("\n")
-
             print(doc.page_content[:2000])
-
             print("\n----------------------------------------")

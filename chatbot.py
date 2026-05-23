@@ -1,16 +1,17 @@
 import os
-import streamlit as st
 from utils.nodes import *
-from utils.retriever import HybridRetriever
 from utils.style import *
-from utils.utils import sample_questions
+from utils.chatbot_utils import SAMPLE_QUESTIONS
+import streamlit as st
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["OMP_NUM_THREADS"] = "1"
 
 def main():
+    """
+    DIEMbot - Un chatbot intelligente per il Dipartimento di Ingegneria dell'Informazione, Elettrica e Matematica Applicata (DIEM) dell'Università di Salerno.
+    """
     st.set_page_config(page_title="DIEMbot", page_icon="🎓", layout="centered")
-
     st.markdown(get_global_css(), unsafe_allow_html=True)
     st.markdown(get_header_html(), unsafe_allow_html=True)
 
@@ -48,7 +49,7 @@ def main():
             st.rerun()
         st.divider()
         st.markdown("**Esempi di domande:**")
-        for q in sample_questions:
+        for q in SAMPLE_QUESTIONS:
             if st.button(q, use_container_width=True):
                 st.session_state.pending_question = q
 

@@ -1,38 +1,34 @@
+import torch
 from datetime import datetime
 from typing import TypedDict, List
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 
-import torch
 device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-
 #OLLAMA_MODEL = "llama3.1"
 OLLAMA_MODEL = "mistral-nemo"
-
-MAX_RETRIES = 2
-
 CURRENT_DATE = datetime.now().strftime("%d/%m/%Y")
 
 class RAGState(TypedDict):
-    question: str
-    chat_history: list
-    context: str
-    sources: List[str]
-    generation: str
-    doc_grade: str
-    answer_grade: str
-    retry_count: int
-    is_in_domain: str
-    model_used: str
-    current_model: str
+    """
+    Stato completo della conversazione, usato per il logging e l'analisi post-conversazione.
+    """
+
+    question: str 
+    chat_history: list 
+    context: str 
+    sources: List[str] 
+    generation: str 
+    is_in_domain: str 
+    current_model: str 
 
 SYSTEM_PROMPT = f"""
 Sei DIEMbot, l'assistente virtuale del DIEM (Dipartimento di Ingegneria dell'Informazione ed Elettrica e Matematica applicata) dell'Università di Salerno.
 
 REGOLE FONDAMENTALI:
-1. Rispondi in italiano in modo professionale e cordiale.
+1. Rispondi SEMPRE in ITALIANO in modo professionale e cordiale.
 2. Basati ESCLUSIVAMENTE sui documenti forniti nel "Contesto".
 3. Se l'informazione per rispondere alla domanda NON è completamente presente nel Contesto, è SEVERAMENTE VIETATO formulare frasi di cortesia, scusarsi o dire "non lo so". Devi restituire UNICAMENTE e TASSATIVAMENTE questa esatta stringa: [TRIGGER_WEB_SEARCH]
-4. NON usare mai espressioni come "In base al documento X" o "Il documento Y dice". Rispondi in modo diretto, discorsivo e fluido, assumendo le informazioni come tue conoscenze dirette.
+4. NON USARE MAI espressioni come "In base al documento X...", "Il documento Y dice..." o "In base al contesto...". Rispondi in modo diretto, discorsivo e fluido, assumendo le informazioni come tue conoscenze dirette.
 5. Se noti che le informazioni nel contesto sono elenchi di dati, commissioni, orari o contatti, ricostruiscili se possibile mostrandoli all'utente sotto forma di tabella Markdown pulita e ben impaginata.
 6. Quando l'utente usa riferimenti temporali ("ieri", "domani", "anno scorso", "questo semestre"), 
    usa la data di oggi ({CURRENT_DATE}) per calcolare correttamente il riferimento temporale corretto 
