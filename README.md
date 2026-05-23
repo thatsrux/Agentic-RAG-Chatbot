@@ -38,6 +38,7 @@ Il sistema sfrutta un'architettura **Advanced RAG** (Retrieval-Augmented Generat
 └── .streamlit/                # Configurazione ambiente Streamlit
     ├── config.toml            # Settaggi tema e server
     └── secrets.toml           # Chiavi API (da configurare)
+```
 
 ## ⚙️ Installazione e Configurazione
 
