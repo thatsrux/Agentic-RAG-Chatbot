@@ -48,8 +48,8 @@ Assicurati di avere **Python 3.10+** installato. È caldamente consigliato l'uso
 
 ```bash
 # Clonazione e navigazione
-git clone <url-della-tua-repo>
-cd <nome-cartella-repo>
+git clone [<url-della-tua-repo>](https://github.com/thatsrux/LLM-Project.git)
+cd <LLM-Project>
 
 # Creazione e attivazione ambiente virtuale (Windows)
 python -m venv venv
