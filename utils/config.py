@@ -86,19 +86,19 @@ Contesto Web:
 Domanda: {question}
 """
 
-keyword_prompt = PromptTemplate.from_template(
+KEYWORD_PROMPT = PromptTemplate.from_template(
         """Sei un motore di routing avanzato per le ricerche del dipartimento DIEM dell'Università di Salerno.
         Devi analizzare la domanda e decidere la query migliore e il SITO SPECIFICO in cui cercare.
         
         REGOLE TASSATIVE:
         1. Aggiungi SEMPRE la parola "DIEM" oppure il nome del corso di laurea (es. "Ingegneria Informatica") alla query.
-        2. Se cerchi un ORARIO (easycourse), aggiungi SEMPRE "Ingegneria Informatica".
+        2. Se cerchi un ORARIO (easycourse), aggiungi il nome del corso di laurea (es. "Ingegneria Informatica") alla query.
         3. Se cerchi un'AULA o l'UBICAZIONE di un laboratorio, usa SEMPRE le parole "strutture didattiche".
         
         DOMINI A DISPOSIZIONE:
         - "diem.unisa.it" : per organi, responsabili, avvisi, bandi.
         - "corsi.unisa.it" : per aule, strutture didattiche, programmi.
-        - "docenti.unisa.it" : SOLO per nome e cognome di un professore.
+        - "docenti.unisa.it" : per informazioni su un docente.
         - "easycourse.unisa.it" : per orari delle lezioni.
         
         Rispondi ESCLUSIVAMENTE con un JSON valido con questo formato:
