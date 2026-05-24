@@ -107,7 +107,7 @@ L'interfaccia sarà disponibile all'indirizzo `http://localhost:8501`.
 
 ---
 
-## 🔄 Aggiornamento della Base di Conoscenza *(Solo Amministratori)*
+## 🔄 Aggiornamento della Knowledge Base
 
 Il sistema fornito contiene dati pre-elaborati. Per aggiornare la conoscenza con nuovi dati ufficiali:
 
