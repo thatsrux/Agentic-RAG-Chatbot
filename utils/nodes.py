@@ -172,7 +172,7 @@ def web_search_node(state: RAGState):
     _sep(RED, "WEB SEARCH")
     question = state["question"]
 
-    keyword_chain = keyword_prompt | load_llm(state.get("current_model")) | StrOutputParser()
+    keyword_chain = KEYWORD_PROMPT | load_llm(state.get("current_model")) | StrOutputParser()
     
     try:
         raw_output = _safe_extract_string(keyword_chain.invoke({"question": question})).strip()
