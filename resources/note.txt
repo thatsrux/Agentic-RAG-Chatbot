@@ -1,3 +1,0 @@
-$env:PYTHONUTF8=1
-python .\crawling.py > log.txt
-streamlit run chatbot.py --server.fileWatcherType none
