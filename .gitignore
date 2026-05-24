@@ -2,7 +2,6 @@
 __pycache__/
 llm_env/
 .streamlit/secrets.toml
-log.txt
 
 # Ignore database files
 knowledge/
