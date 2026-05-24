@@ -75,6 +75,11 @@ def main():
                 if msg["role"] == "assistant":
                     model_name = msg.get("model_used", "Sconosciuto")
                     st.markdown(get_info_icon_html(model_name), unsafe_allow_html=True)
+
+                    if "steps" in msg and msg["steps"]:
+                        with st.status("Elaborazione completata", state="complete", expanded=False):
+                            for step in msg["steps"]:
+                                st.write(step)
                 
                 st.markdown(msg["content"])
                 
@@ -94,6 +99,7 @@ def main():
 
             final_state = initial_state.copy()
             generation_error = None
+            steps_log = []
 
             try:
                 with st.status("✍️ Analisi della domanda...", expanded=True) as status:
@@ -102,33 +108,47 @@ def main():
                             final_state.update(node_state)
 
                             if node_name == "condense_question":
-                                st.write("✔️ Domanda contestualizzata")
+                                step_msg = "✔️ Domanda contestualizzata"
+                                st.write(step_msg)
+                                steps_log.append(step_msg)
                                 status.update(label="🛡️ Verifica del dominio in corso...")
 
                             elif node_name == "domain_guard":
                                 if final_state.get("is_in_domain") == "no":
-                                    st.write("🛑 Domanda fuori dominio")
+                                    step_msg = "🛑 Domanda fuori dominio"
+                                    st.write(step_msg)
+                                    steps_log.append(step_msg)
                                     status.update(label="Elaborazione completata", state="complete", expanded=False)
                                 else:
-                                    st.write("✔️ Dominio confermato")
+                                    step_msg = "✔️ Dominio confermato"
+                                    st.write(step_msg)
+                                    steps_log.append(step_msg)
                                     status.update(label="🔍 Recupero informazioni dal database...")
 
                             elif node_name == "retrieve":
                                 docs_count = len(final_state.get("sources", []))
-                                st.write(f"✔️ Recuperati {docs_count} documenti")
+                                step_msg = f"✔️ Recuperati {docs_count} documenti"
+                                st.write(step_msg)
+                                steps_log.append(step_msg)
                                 status.update(label="🧠 Generazione della risposta...")
 
                             elif node_name == "generate":
                                 generation = final_state.get("generation", "")
                                 if "[TRIGGER_WEB_SEARCH]" in generation:
-                                    st.write("⚠️ Informazioni non trovate nel database locale")
+                                    step_msg = "⚠️ Informazioni non trovate nel database locale"
+                                    st.write(step_msg)
+                                    steps_log.append(step_msg)
                                     status.update(label="🌐 Ricerca sul Web in corso...")
                                 else:
-                                    st.write("✔️ Risposta generata dal database")
+                                    step_msg = "✔️ Risposta generata dal database"
+                                    st.write(step_msg)
+                                    steps_log.append(step_msg)
                                     status.update(label="Elaborazione completata", state="complete", expanded=False)
 
                             elif node_name == "web_search":
-                                st.write("✔️ Risposta generata dalle fonti web")
+                                step_msg = "✔️ Risposta generata dalle fonti web"
+                                st.write(step_msg)
+                                steps_log.append(step_msg)
                                 status.update(label="Elaborazione completata", state="complete", expanded=False)
 
             except Exception as e:
@@ -150,7 +170,8 @@ def main():
                 "role": "assistant",
                 "content": full_response,
                 "sources": sources_list,
-                "model_used": used_model
+                "model_used": used_model,
+                "steps": steps_log
             })
 
             if used_model != st.session_state.current_model:
