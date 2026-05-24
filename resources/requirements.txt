@@ -1,38 +1,35 @@
-# DIEM RAG Chatbot — dipendenze
+--extra-index-url https://download.pytorch.org/whl/cu124
 
-# Core LLM & RAG
+# ==========================================
+# DIEMbot - Requirements
+# ==========================================
+
+# Core LangChain & LangGraph
 langchain>=0.3.0
 langchain-core>=0.3.0
 langchain-community>=0.3.0
-langchain-huggingface>=0.1.0
-langgraph-checkpoint-sqlite
-langchain_google_genai
+langchain-text-splitters>=0.3.0
+langgraph>=0.2.0
 
-# Ollama (Llama 3.1 in locale)
+# Integrazioni Modelli (Cloud & Local)
+langchain-google-genai>=2.0.0
 langchain-ollama>=0.2.0
-# Requisito esterno: Ollama installato e in esecuzione
-#   → https://ollama.com/download
-#   → ollama pull llama3.1
-#   → ollama serve
+langchain-huggingface>=0.1.0
 
-# Vector store
+# Motori di Ricerca (Vector, Sparse, Reranking & Web)
 faiss-cpu>=1.8.0
-langchain-chroma>=0.1.0
-chromadb>=0.5.0
-
-# Embedding & Reranking
 sentence-transformers>=3.0.0
+torch==2.6.0+cu124
+torchaudio==2.6.0+cu124
+torchvision==0.21.0+cu124
+rank_bm25>=0.2.2
+duckduckgo-search>=6.0.0
 
-# Interfaccia
-streamlit>=1.40.0
-
-# Crawling (già usato)
+# Scraping, Parsing & Crawling
 crawl4ai>=0.8.0
 beautifulsoup4>=4.12.0
 pypdf>=4.0.0
 requests>=2.32.0
-openpyxl
-xlrd
 
-# Valutazione
-deepeval
+# Interfaccia Utente
+streamlit>=1.40.0
