@@ -2,7 +2,8 @@
 __pycache__/
 llm_env/
 .streamlit/secrets.toml
+.DS_Store
+__init__.py
 
 # Ignore database files
 knowledge/
-knowledge_old/
