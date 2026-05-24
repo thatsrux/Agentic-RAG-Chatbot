@@ -52,12 +52,18 @@ git clone https://github.com/thatsrux/LLM-Project.git
 cd LLM-Project
 
 # Creazione e attivazione ambiente virtuale 
-python -m venv venv
-venv\Scripts\activate
+conda create -n diembot python=3.11 -y
+conda activate diembot
 
 # Installazione delle dipendenze
 pip install -r resources/requirements.txt
+
+# Installazione dei browser headless necessari per il Web Crawling
+playwright install
 ```
+> ⚠️ **Nota sull'Accelerazione Hardware (GPU)**
+> Il file `requirements.txt` è preconfigurato per l'installazione di PyTorch con supporto a **NVIDIA CUDA 12.4**. 
+> Se si utilizza un sistema basato esclusivamente su CPU, macOS (Apple Silicon/Intel), o una scheda grafica differente, è necessario **rimuovere la prima riga** del file `resources/requirements.txt` (`--extra-index-url https://download.pytorch.org/whl/cu124`) prima di procedere e modificare le installazione dei pacchetti torch, torchaudio e torchvision, al fine di evitare il download di pacchetti incompatibili e inutilmente pesanti.
 
 ### 2. Scompattare la Knowledge Base
 
