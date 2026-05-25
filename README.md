@@ -113,9 +113,9 @@ L'interfaccia sarà disponibile all'indirizzo `http://localhost:8501`.
 
 ---
 
-## 🔄 Aggiornamento della Base di Conoscenza *(Solo Amministratori)*
+## 🔄 Aggiornamento della Knowledge Base
 
-Il sistema fornito contiene dati pre-elaborati. Per aggiornare la conoscenza con nuovi dati ufficiali:
+Il sistema fornito contiene dati pre-elaborati. Per aggiornare la knowledge con nuovi dati ufficiali:
 
 **1. Eseguire il Crawling Incrementale**  
 Scarica le nuove pagine web e PDF dai siti istituzionali. Grazie all'hashing MD5, lo script ignorerà i file non modificati.

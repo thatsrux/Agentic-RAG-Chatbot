@@ -66,13 +66,13 @@ def load_llm(selected_model: str = "gemini-3.1-flash-lite"):
     )
         
     if selected_model == "gemini-3.1-flash-lite":
-        return gemini_31.with_fallbacks([gemini_35, gemini_25, mistral])
+        return gemini_31.with_fallbacks([gemini_35, gemini_25, mistral, llama])
     elif selected_model == "gemini-3.5-flash":
-        return gemini_35.with_fallbacks([gemini_31, gemini_25, mistral])
+        return gemini_35.with_fallbacks([gemini_31, gemini_25, mistral, llama])
     elif selected_model == "gemini-2.5-flash":
-        return gemini_25.with_fallbacks([gemini_31, gemini_35, mistral])
+        return gemini_25.with_fallbacks([gemini_31, gemini_35, mistral, llama])
     elif selected_model == "mistral-nemo":
-        return mistral.with_fallbacks([llama])
+        return mistral.with_fallbacks([gemini_31, gemini_35, gemini_25, llama])
     else: 
         return llama
 

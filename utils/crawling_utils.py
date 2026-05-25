@@ -16,7 +16,7 @@ PDF_MD_DIR = os.path.join(DATA_PATH, "PDFs")
 STATE_FILE = "knowledge/crawler_state.json"
 KB_FILE = "knowledge/knowledge_base.pkl"
 
-KEYWORDS = ["DIEM", "DIPARTIMENTO DI INGEGNERIA DELL'INFORMAZIONE", "INGEGNERIA INFORMATICA"]
+KEYWORDS = ["DIEM", "DIPARTIMENTO DI INGEGNERIA DELL'INFORMAZIONE ED ELETTRICA E MATEMATICA APPLICATA"]
 CORSI_DIEM_URLS = [
     "https://corsi.unisa.it/ingegneria-dell-informazione-per-la-medicina-digitale",
     "https://corsi.unisa.it/ingegneria-informatica",
